@@ -1,5 +1,5 @@
 run:
-	cargo build
+	cargo build --bin esp32
 	espflash flash --monitor target/xtensa-esp32-espidf/debug/esp32
 
 deploy:
