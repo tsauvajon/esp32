@@ -55,9 +55,9 @@ fn main() -> Result<(), EspError> {
     let mut segment_display = SegmentDisplay::try_new(
         digit1, digit2, digit3, digit4, seg_a, seg_b, seg_c, seg_d, seg_e, seg_f, seg_g,
     )?;
-    segment_display.display(1234)?;
 
     loop {
+        segment_display.display(1234)?;
         // blink(&mut led)?;
     }
 }

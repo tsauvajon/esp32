@@ -3,7 +3,6 @@
 
 use std::{thread::sleep, time::Duration};
 
-use digits::split;
 use esp_idf_svc::{
     hal::gpio::{Output, Pin, PinDriver},
     sys::EspError,
@@ -134,4 +133,15 @@ where
 
         Ok(())
     }
+}
+
+pub fn split(number: u16) -> (u8, u8, u8, u8) {
+    let number = if number > 9999 { 9999 } else { number };
+
+    (
+        (number / 1000).try_into().unwrap(),
+        ((number / 100) % 10).try_into().unwrap(),
+        ((number / 10) % 10).try_into().unwrap(),
+        (number % 10).try_into().unwrap(),
+    )
 }
