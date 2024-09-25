@@ -8,7 +8,8 @@ use esp_idf_svc::{
     sys::EspError,
 };
 
-pub mod numbers;
+pub mod example;
+mod numbers;
 
 // This is the value required by the component
 const DELAY_MICROSECONDS: u64 = 54;
@@ -96,6 +97,11 @@ where
     }
 
     pub fn clear(&mut self) -> Result<(), EspError> {
+        self.digit1.set_low()?;
+        self.digit2.set_low()?;
+        self.digit3.set_low()?;
+        self.digit4.set_low()?;
+
         self.seg_a.set_low()?;
         self.seg_b.set_low()?;
         self.seg_c.set_low()?;
@@ -136,7 +142,7 @@ where
     }
 }
 
-pub fn split(number: u16) -> (u8, u8, u8, u8) {
+fn split(number: u16) -> (u8, u8, u8, u8) {
     let number = if number > 9999 { 9999 } else { number };
 
     (
