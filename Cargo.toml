@@ -1,5 +1,10 @@
-[workspace]
+[package]
+name = "esp32"
+version = "0.1.0"
+authors = ["Thomas Sauvajon <thomas@sauvajon.tech>"]
+edition = "2021"
 resolver = "2"
+rust-version = "1.77"
 
 [profile.release]
 opt-level = "s"
@@ -8,16 +13,9 @@ opt-level = "s"
 debug = true    # Symbols are nice and they don't increase the size on Flash
 opt-level = "z"
 
-[package]
-name = "esp32"
-version = "0.1.0"
-authors = ["Thomas Sauvajon <thomas@sauvajon.tech>"]
-edition = "2021"
-rust-version = "1.77"
-
 [[bin]]
 name = "esp32"
-harness = true # do not use the built in cargo test harness -> resolve rust-analyzer errors
+harness = false # do not use the built in cargo test harness -> resolve rust-analyzer errors
 
 [features]
 default = ["std", "embassy", "esp-idf-svc/native"]

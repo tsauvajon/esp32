@@ -155,7 +155,6 @@ fn split(number: u16) -> (u8, u8, u8, u8) {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn splits_zero() {
