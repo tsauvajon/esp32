@@ -64,6 +64,7 @@ where
     SegF: Pin,
     SegG: Pin,
 {
+    #[allow(clippy::too_many_arguments)]
     pub fn try_new(
         digit1: Driver<'a, Digit1>,
         digit2: Driver<'a, Digit2>,

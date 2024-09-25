@@ -56,6 +56,8 @@ fn main() -> Result<(), EspError> {
         digit1, digit2, digit3, digit4, seg_a, seg_b, seg_c, seg_d, seg_e, seg_f, seg_g,
     )?;
 
+    log::info!("Connected display");
+
     loop {
         segment_display.display(1234)?;
         // blink(&mut led)?;
