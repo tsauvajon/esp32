@@ -1,5 +1,9 @@
 use std::{thread::sleep, time::Duration};
 
+use dht_sensor::dht11;
+use dht_sensor::DhtReading;
+use esp_idf_svc::hal::delay;
+use esp_idf_svc::hal::delay::FreeRtos;
 use esp_idf_svc::hal::task::watchdog::{config::Config, TWDTDriver};
 use esp_idf_svc::{
     hal::{
@@ -8,6 +12,7 @@ use esp_idf_svc::{
     },
     sys::EspError,
 };
+use log::{error, info};
 
 mod segment_display;
 
@@ -15,21 +20,15 @@ fn main() -> Result<(), EspError> {
     // It is necessary to call this function once. Otherwise some patches to the runtime
     // implemented by esp-idf-sys might not link properly. See https://github.com/esp-rs/esp-idf-template/issues/71
     esp_idf_svc::sys::link_patches();
-
     esp_idf_svc::log::EspLogger::initialize_default();
 
-    let peripherals = Peripherals::take()?;
+    info!("Hello, world!");
 
-    log::info!("Hello, world!");
-
-    let mut twdt_driver = TWDTDriver::new(peripherals.twdt, &Config::default()).unwrap();
-    let mut sub = twdt_driver.watch_current_task().unwrap();
+    humidity_and_temperature()?;
+    info!("Done!");
 
     loop {
         sleep(Duration::from_millis(54));
-        // blink(&mut led)?;
-        // _segment_display()?;
-        sub.feed().unwrap();
     }
 }
 
@@ -46,4 +45,49 @@ fn _blink(led: &mut PinDriver<'_, impl Pin, Output>) -> Result<(), EspError> {
 pub fn _segment_display() -> Result<(), EspError> {
     let peripherals = Peripherals::take()?;
     segment_display::example::_display_1234(peripherals)
+}
+
+pub fn humidity_and_temperature() -> Result<(), EspError> {
+    // let peripherals = Peripherals::take()?;
+    // let mut sensor = PinDriver::input_output(peripherals.pins.gpio10)?;
+    // // sensor.set_high()?;
+
+    // loop {
+    //     match dht11::Reading::read(&mut Ets, &mut sensor) {
+    //         Ok(reading) => info!(
+    //             "Temperature: {}\tRelative humidity: {}",
+    //             reading.temperature, reading.relative_humidity
+    //         ),
+    //         Err(err) => error!("Failed to retrieve information: {err:?}"),
+    //     }
+
+    //     FreeRtos::delay_ms(1000);
+    // }
+
+    let peripherals = Peripherals::take().unwrap();
+    let pin = peripherals.pins.gpio23;
+    let mut sensor = PinDriver::input_output(pin).unwrap();
+    sensor.set_high().unwrap();
+    FreeRtos::delay_ms(1000);
+    let mut i: u64 = 1;
+    loop {
+        match dht11::Reading::read(&mut delay::Delay::new(2_000_000), &mut sensor) {
+            Ok(reading) => info!(
+                "[{i}] Temperature: {}\tRelative humidity: {}",
+                reading.temperature, reading.relative_humidity
+            ),
+            Err(err) => error!("Failed to retrieve information: {err:?}"),
+        }
+        i = i + 1;
+        FreeRtos::delay_ms(3000);
+    }
+}
+
+fn _watchdog() {
+    let peripherals = Peripherals::take().unwrap();
+    let mut twdt_driver = TWDTDriver::new(peripherals.twdt, &Config::default()).unwrap();
+    let mut sub = twdt_driver.watch_current_task().unwrap();
+    loop {
+        sub.feed().unwrap();
+    }
 }
