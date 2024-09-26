@@ -48,37 +48,19 @@ pub fn _segment_display() -> Result<(), EspError> {
 }
 
 pub fn humidity_and_temperature() -> Result<(), EspError> {
-    // let peripherals = Peripherals::take()?;
-    // let mut sensor = PinDriver::input_output(peripherals.pins.gpio10)?;
-    // // sensor.set_high()?;
-
-    // loop {
-    //     match dht11::Reading::read(&mut Ets, &mut sensor) {
-    //         Ok(reading) => info!(
-    //             "Temperature: {}\tRelative humidity: {}",
-    //             reading.temperature, reading.relative_humidity
-    //         ),
-    //         Err(err) => error!("Failed to retrieve information: {err:?}"),
-    //     }
-
-    //     FreeRtos::delay_ms(1000);
-    // }
-
     let peripherals = Peripherals::take().unwrap();
     let pin = peripherals.pins.gpio23;
     let mut sensor = PinDriver::input_output(pin).unwrap();
     sensor.set_high().unwrap();
     FreeRtos::delay_ms(1000);
-    let mut i: u64 = 1;
     loop {
         match dht11::Reading::read(&mut delay::Delay::new(2_000_000), &mut sensor) {
             Ok(reading) => info!(
-                "[{i}] Temperature: {}\tRelative humidity: {}",
+                "[Temperature: {}\tRelative humidity: {}",
                 reading.temperature, reading.relative_humidity
             ),
             Err(err) => error!("Failed to retrieve information: {err:?}"),
         }
-        i = i + 1;
         FreeRtos::delay_ms(3000);
     }
 }
