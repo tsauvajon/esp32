@@ -11,6 +11,8 @@ use esp_hal::{
     time::Rate,
 };
 
+pub mod pink_panther;
+
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Note {
     B0,
@@ -215,98 +217,6 @@ impl From<Note> for PulseCode {
     }
 }
 
-pub const PINK_PANTHER_TEMPO: u16 = 120;
-pub const PINK_PANTHER_MELODY: [(Note, i16); 88] = [
-    (Note::Silence, 2),
-    (Note::Silence, 4),
-    (Note::Silence, 8),
-    (Note::DS4, 8),
-    (Note::E4, -4),
-    (Note::Silence, 8),
-    (Note::FS4, 8),
-    (Note::G4, -4),
-    (Note::Silence, 8),
-    (Note::DS4, 8),
-    (Note::E4, -8),
-    (Note::FS4, 8),
-    (Note::G4, -8),
-    (Note::C5, 8),
-    (Note::B4, -8),
-    (Note::E4, 8),
-    (Note::G4, -8),
-    (Note::B4, 8),
-    (Note::AS4, 2),
-    (Note::A4, -16),
-    (Note::G4, -16),
-    (Note::E4, -16),
-    (Note::D4, -16),
-    (Note::E4, 2),
-    (Note::Silence, 4),
-    (Note::Silence, 8),
-    (Note::DS4, 4),
-    (Note::E4, -4),
-    (Note::Silence, 8),
-    (Note::FS4, 8),
-    (Note::G4, -4),
-    (Note::Silence, 8),
-    (Note::DS4, 8),
-    (Note::E4, -8),
-    (Note::FS4, 8),
-    (Note::G4, -8),
-    (Note::C5, 8),
-    (Note::B4, -8),
-    (Note::G4, 8),
-    (Note::B4, -8),
-    (Note::E5, 8),
-    (Note::DS5, 1),
-    (Note::D5, 2),
-    (Note::Silence, 4),
-    (Note::Silence, 8),
-    (Note::DS4, 8),
-    (Note::E4, -4),
-    (Note::Silence, 8),
-    (Note::FS4, 8),
-    (Note::G4, -4),
-    (Note::Silence, 8),
-    (Note::DS4, 8),
-    (Note::E4, -8),
-    (Note::FS4, 8),
-    (Note::G4, -8),
-    (Note::C5, 8),
-    (Note::B4, -8),
-    (Note::E4, 8),
-    (Note::G4, -8),
-    (Note::B4, 8),
-    (Note::AS4, 2),
-    (Note::A4, -16),
-    (Note::G4, -16),
-    (Note::E4, -16),
-    (Note::D4, -16),
-    (Note::E4, -4),
-    (Note::Silence, 4),
-    (Note::Silence, 4),
-    (Note::E5, -8),
-    (Note::D5, 8),
-    (Note::B4, -8),
-    (Note::A4, 8),
-    (Note::G4, -8),
-    (Note::E4, -8),
-    (Note::AS4, 16),
-    (Note::A4, -8),
-    (Note::AS4, 16),
-    (Note::A4, -8),
-    (Note::AS4, 16),
-    (Note::A4, -8),
-    (Note::AS4, 16),
-    (Note::A4, -8),
-    (Note::G4, -16),
-    (Note::E4, -16),
-    (Note::D4, -16),
-    (Note::E4, 16),
-    (Note::E4, 16),
-    (Note::E4, 2),
-];
-
 pub struct Song {
     whole_note: u32,
 }
@@ -327,20 +237,20 @@ impl Song {
     }
 }
 
-pub fn play_pink_panther_theme(peripherals: Peripherals) {
+pub fn play_song(peripherals: Peripherals, tempo: u16, melody: &[(Note, i16)]) {
     let ledc = Ledc::new(peripherals.LEDC);
     let mut hstimer0 = ledc.timer::<HighSpeed>(timer::Number::Timer0);
 
     let delay = Delay::new();
-    let song = Song::new(PINK_PANTHER_TEMPO);
-    for (note, duration_type) in PINK_PANTHER_MELODY {
-        let note_duration = song.calc_note_duration(duration_type);
-        if note == Note::Silence {
+    let song = Song::new(tempo);
+    for (note, duration_type) in melody {
+        let note_duration = song.calc_note_duration(*duration_type);
+        if *note == Note::Silence {
             delay.delay_millis(note_duration);
             continue;
         }
 
-        let frequency = Rate::from(note);
+        let frequency = Rate::from(*note);
         hstimer0
             .configure(timer::config::Config {
                 duty: timer::config::Duty::Duty10Bit,
