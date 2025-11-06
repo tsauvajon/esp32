@@ -1,4 +1,5 @@
 use esp_hal::{
+    Blocking,
     delay::Delay,
     gpio::{DriveMode, Level},
     ledc::{
@@ -7,7 +8,10 @@ use esp_hal::{
         timer::{self, TimerIFace},
     },
     peripherals::Peripherals,
-    rmt::{ContinuousTxTransaction, LoopMode, PulseCode, Rmt, TxChannelConfig, TxChannelCreator},
+    rmt::{
+        Channel, ContinuousTxTransaction, LoopMode, PulseCode, Rmt, Tx, TxChannelConfig,
+        TxChannelCreator,
+    },
     time::Rate,
 };
 
@@ -110,12 +114,29 @@ pub enum Note {
     Silence,
 }
 
+/// Both methods there are a bit in reverse; it'd make more sense to write
+/// `channel.play(note)` and `tx.replace(note)` than `note.play_in(channel)`
+/// and `note.replace_in(tx)`.
+///
+/// TODO: create a Jukebox type that allows doing this.
 impl Note {
-    pub fn play<'ch>(&self, tx: ContinuousTxTransaction<'ch>) -> ContinuousTxTransaction<'ch> {
-        tx.stop()
-            .unwrap()
+    /// Start playing a note on a RMT channel
+    pub fn play_in<'ch>(
+        &self,
+        channel: Channel<'ch, Blocking, Tx>,
+    ) -> ContinuousTxTransaction<'ch> {
+        channel
             .transmit_continuously(&[self], LoopMode::Infinite)
             .unwrap()
+    }
+
+    /// Stop the current note transmission, and start a new one on the same channel
+    pub fn replace_in<'ch>(
+        &self,
+        tx: ContinuousTxTransaction<'ch>,
+    ) -> ContinuousTxTransaction<'ch> {
+        let channel = tx.stop().unwrap();
+        self.play_in(channel)
     }
 }
 
@@ -272,24 +293,22 @@ pub fn play_song_with_rmt(peripherals: Peripherals, tempo: u16, melody: &[(Note,
         TxChannelConfig::default().with_clk_divider(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32 as u8), // 80 MHz / 80 = 1 MhZ clock
     )
     .unwrap();
-    let mut buzzer_tx = buzzer_channel
-        .transmit_continuously(&[Note::Silence], LoopMode::Infinite)
-        .unwrap();
 
+    let mut buzzer_tx = Note::Silence.play_in(buzzer_channel);
     let delay = Delay::new();
     let song = Song::new(tempo);
     for (note, duration_type) in melody {
         let note_duration = song.calc_note_duration(*duration_type);
         if *note == Note::Silence {
-            buzzer_tx = Note::Silence.play(buzzer_tx);
+            buzzer_tx = Note::Silence.replace_in(buzzer_tx);
             delay.delay_millis(note_duration);
             continue;
         }
 
-        buzzer_tx = note.play(buzzer_tx);
+        buzzer_tx = note.replace_in(buzzer_tx);
         let pause_duration = note_duration / 10; // 10% of note_duration
         delay.delay_millis(note_duration - pause_duration); // play 90%
-        buzzer_tx = Note::Silence.play(buzzer_tx);
+        buzzer_tx = Note::Silence.replace_in(buzzer_tx);
         delay.delay_millis(pause_duration); // Pause for 10%
     }
 }
