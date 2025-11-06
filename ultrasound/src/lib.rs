@@ -60,7 +60,7 @@ pub fn run(peripherals: Peripherals) -> ! {
     )
     .unwrap();
     let mut buzzer_tx = buzzer_channel
-        .transmit_continuously(&[PulseCode::from(Note::Silence); 1], LoopMode::Infinite)
+        .transmit_continuously(&[Note::Silence], LoopMode::Infinite)
         .unwrap();
 
     loop {
@@ -84,7 +84,7 @@ pub fn run(peripherals: Peripherals) -> ! {
         buzzer_tx = buzzer_tx
             .stop()
             .unwrap()
-            .transmit_continuously(&[PulseCode::from(note); 1], LoopMode::Infinite)
+            .transmit_continuously(&[note], LoopMode::Infinite)
             .unwrap();
 
         Delay::new().delay_millis(10);
