@@ -24,6 +24,7 @@ use crate::notes::Note;
 const MAX_USEFUL_DISTANCE_CM: f64 = 60.0;
 const SOUND_CM_PER_MICROSECOND: f64 = 0.0343;
 const ROUND_TRIP_SEGMENTS: f64 = 2.0;
+const MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32: u32 = 80;
 
 pub fn run(peripherals: Peripherals) -> ! {
     // LED
@@ -48,11 +49,15 @@ pub fn run(peripherals: Peripherals) -> ! {
         .unwrap();
 
     // RMT Buzzer
-    let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80)).unwrap();
+    let rmt = Rmt::new(
+        peripherals.RMT,
+        Rate::from_mhz(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32),
+    )
+    .unwrap();
     let buzzer_channel = TxChannelCreator::configure_tx(
         rmt.channel2,
         peripherals.GPIO27,
-        TxChannelConfig::default().with_clk_divider(80), // 80 MhZ / 80 = 1 MhZ clock
+        TxChannelConfig::default().with_clk_divider(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32 as u8), // 80 MHz / 80 = 1 MhZ clock
     )
     .unwrap();
     let mut buzzer_tx = buzzer_channel
@@ -108,7 +113,7 @@ fn brightness_percentage(distance: f64) -> u8 {
     brightness.min(100)
 }
 
-fn send_wave(trigger: &mut Output) {
+fn send_wave(trigger: &mut Output<'_>) {
     let delay = Delay::new(); // TODO: take an `impl DelayNs` instead
 
     // Ensure the Trigger pin is low before starting
@@ -122,7 +127,7 @@ fn send_wave(trigger: &mut Output) {
 }
 
 /// Reads the pulse width in microseconds, which is equal to the delay between waves
-fn measure_echo(echo: &Input, real_time_clock: &Rtc) -> UltrasoundPulse {
+fn measure_echo(echo: &Input<'_>, real_time_clock: &Rtc<'_>) -> UltrasoundPulse {
     while echo.is_low() {}
     let start = real_time_clock.current_time_us();
     while echo.is_high() {}
