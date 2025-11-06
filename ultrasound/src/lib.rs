@@ -1,6 +1,6 @@
 #![no_std]
 
-// pub mod notes;
+pub mod notes;
 
 use esp_hal::{
     delay::Delay,

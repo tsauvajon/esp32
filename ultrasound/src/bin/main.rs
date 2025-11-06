@@ -9,6 +9,7 @@
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::main;
+use ultrasound::notes::play_pink_panther;
 use ultrasound::run;
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -20,5 +21,10 @@ fn main() -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    run(peripherals);
+    play_pink_panther(peripherals);
+    // run(peripherals);
+
+    loop {
+        esp_hal::delay::Delay::new().delay_millis(99999);
+    }
 }
