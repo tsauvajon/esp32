@@ -6,7 +6,7 @@ use esp_hal::{
         channel::{self, Channel, ChannelIFace},
         timer::{self, Timer, TimerIFace},
     },
-    peripherals::{LEDC, Peripherals},
+    peripherals::Peripherals,
     time::Rate,
 };
 
@@ -254,7 +254,7 @@ pub fn play_note<'a>(
     channel0
 }
 
-pub fn play_pink_panther(peripherals: Peripherals) {
+pub fn play_pink_panther_theme(peripherals: Peripherals) {
     let ledc = Ledc::new(peripherals.LEDC);
     let mut hstimer0 = ledc.timer::<HighSpeed>(timer::Number::Timer0);
 

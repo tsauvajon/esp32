@@ -6,7 +6,7 @@ use esp_hal::{
     delay::Delay,
     gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull},
     ledc::{
-        HighSpeed, LSGlobalClkSource, Ledc, LowSpeed,
+        LSGlobalClkSource, Ledc, LowSpeed,
         channel::{self, ChannelIFace, config::Config as ChannelConfig},
         timer::{
             self, LSClockSource, TimerIFace,
@@ -18,11 +18,11 @@ use esp_hal::{
     time::Rate,
 };
 
+use crate::notes::{Note, play_note};
+
 const MAX_USEFUL_DISTANCE_CM: f64 = 60.0;
 const SOUND_CM_PER_MICROSECOND: f64 = 0.0343;
 const ROUND_TRIP_SEGMENTS: f64 = 2.0;
-
-const NOTE_DS4: f64 = 311.0;
 
 pub fn run(peripherals: Peripherals) -> ! {
     // LED
@@ -37,8 +37,8 @@ pub fn run(peripherals: Peripherals) -> ! {
             frequency: Rate::from_khz(24),
         })
         .unwrap();
-    let mut channel0 = ledc.channel(channel::Number::Channel0, led);
-    channel0
+    let mut led_channel = ledc.channel(channel::Number::Channel0, led);
+    led_channel
         .configure(ChannelConfig {
             timer: &lstimer0,
             duty_pct: 10,
@@ -47,25 +47,9 @@ pub fn run(peripherals: Peripherals) -> ! {
         .unwrap();
 
     // BUZZER
-    let buzzer = Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default());
-    let note = NOTE_DS4;
-    let frequency = Rate::from_hz(note as u32);
-    let mut hstimer1 = ledc.timer::<HighSpeed>(timer::Number::Timer1);
-    hstimer1
-        .configure(timer::config::Config {
-            duty: timer::config::Duty::Duty10Bit,
-            clock_source: timer::HSClockSource::APBClk,
-            frequency,
-        })
-        .unwrap();
-    let mut channel1 = ledc.channel(channel::Number::Channel1, buzzer);
-    channel1
-        .configure(channel::config::Config {
-            timer: &hstimer1,
-            duty_pct: 50,
-            drive_mode: DriveMode::PushPull,
-        })
-        .unwrap();
+    let note_ds4 = Note::from_frequency(notes::NOTE_DS4 as u32).build_timer(&ledc);
+    let note_fs4 = Note::from_frequency(notes::NOTE_FS4 as u32).build_timer(&ledc);
+    let note_gs4 = Note::from_frequency(notes::NOTE_GS4 as u32).build_timer(&ledc);
 
     // Emit ultrasound waves
     let mut trigger = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());
@@ -85,12 +69,20 @@ pub fn run(peripherals: Peripherals) -> ! {
 
         let brightness_pct = brightness_percentage(distance);
         // info!("Calculated a distance of {distance:.0} cm. Led brightness of {brightness_pct}%");
-        channel0.set_duty(brightness_pct).unwrap();
-        if brightness_pct > 0 {
-            channel1.set_duty(50).unwrap();
-        } else {
-            channel1.set_duty(0).unwrap();
+        led_channel.set_duty(brightness_pct).unwrap();
+
+        let buzzer = Output::new(
+            unsafe { Peripherals::steal().GPIO27 },
+            Level::Low,
+            OutputConfig::default(),
+        );
+        match brightness_pct {
+            1..=32 => play_note(&ledc, &note_ds4, buzzer).set_duty(50),
+            33..=65 => play_note(&ledc, &note_fs4, buzzer).set_duty(50),
+            66..=100 => play_note(&ledc, &note_gs4, buzzer).set_duty(50),
+            0 | 101.. => play_note(&ledc, &note_ds4, buzzer).set_duty(0),
         }
+        .unwrap();
 
         Delay::new().delay_millis(10);
     }
