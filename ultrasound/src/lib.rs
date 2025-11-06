@@ -4,19 +4,17 @@ pub mod notes;
 
 use esp_hal::{
     delay::Delay,
-    gpio::{
-        DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull,
-        interconnect::PeripheralOutput,
-    },
+    gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull},
     ledc::{
-        HighSpeed, LSGlobalClkSource, Ledc, LowSpeed,
-        channel::{self, Channel, ChannelIFace, config::Config as ChannelConfig},
+        LSGlobalClkSource, Ledc, LowSpeed,
+        channel::{self, ChannelIFace, config::Config as ChannelConfig},
         timer::{
-            self, LSClockSource, Timer, TimerIFace,
+            self, LSClockSource, TimerIFace,
             config::{Config as TimerConfig, Duty},
         },
     },
     peripherals::Peripherals,
+    rmt::{LoopMode, PulseCode, Rmt, TxChannelConfig, TxChannelCreator},
     rtc_cntl::Rtc,
     time::Rate,
 };
@@ -49,25 +47,17 @@ pub fn run(peripherals: Peripherals) -> ! {
         })
         .unwrap();
 
-    // BUZZER
-    // let mut hstimer1 = ledc.timer::<HighSpeed>(timer::Number::Timer1);
-    // hstimer1
-    //     .configure(timer::config::Config {
-    //         duty: timer::config::Duty::Duty10Bit,
-    //         clock_source: timer::HSClockSource::APBClk,
-    //         frequency: Note::A1.rate(), // Will be replaced
-    //     })
-    //     .unwrap();
-    // let buzzer = Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default());
-    // let mut rmt = Rmt::new(peripherals.RMT, Note::A1.rate()).unwrap();
-    // let buzzer_channel = rmt
-    //     .channel0
-    //     .configure_tx(peripherals.GPIO27, TxChannelConfig::default())
-    //     .unwrap();
-    // buzzer_channel
-    //     .transmit(&[PulseCode::new(Level::High, 200, Level::Low, 50); 20])
-    //     .unwrap();
-    // let buzzer_channel = note_channel(&ledc, &hstimer1, buzzer);
+    // RMT Buzzer
+    let rmt = Rmt::new(peripherals.RMT, Rate::from_mhz(80)).unwrap();
+    let buzzer_channel = TxChannelCreator::configure_tx(
+        rmt.channel2,
+        peripherals.GPIO27,
+        TxChannelConfig::default().with_clk_divider(80), // 80 MhZ / 80 = 1 MhZ clock
+    )
+    .unwrap();
+    let mut buzzer_tx = buzzer_channel
+        .transmit_continuously(&[PulseCode::from(Note::Silence); 1], LoopMode::Infinite)
+        .unwrap();
 
     // Emit ultrasound waves
     let mut trigger = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());
@@ -90,24 +80,18 @@ pub fn run(peripherals: Peripherals) -> ! {
         led_channel.set_duty(brightness_pct).unwrap();
 
         let note = match brightness_pct {
-            1..=32 => Note::DS4,
-            33..=65 => Note::GS7,
-            66..=100 => Note::C8,
-            0 | 101.. => Note::A1,
+            1..=25 => Note::C6,
+            26..=50 => Note::A4,
+            51..=75 => Note::E4,
+            76..=100 => Note::C4,
+            0 | 101.. => Note::Silence,
         };
-        let mut hstimer1 = ledc.timer::<HighSpeed>(timer::Number::Timer1);
-        hstimer1
-            .configure(timer::config::Config {
-                duty: timer::config::Duty::Duty10Bit,
-                clock_source: timer::HSClockSource::APBClk,
-                frequency: note.rate(),
-            })
-            .unwrap();
-        let buzzer_channel = note_channel(&ledc, &hstimer1, unsafe {
-            peripherals.GPIO27.clone_unchecked()
-        });
-        buzzer_channel
-            .set_duty(if brightness_pct == 0 { 0 } else { 50 })
+        // Mutates the variable to always keep transmitting a note.
+        // On each loop iteration, stop transmitting and transmit a new note.
+        buzzer_tx = buzzer_tx
+            .stop()
+            .unwrap()
+            .transmit_continuously(&[PulseCode::from(note); 1], LoopMode::Infinite)
             .unwrap();
 
         Delay::new().delay_millis(10);
@@ -138,22 +122,22 @@ fn send_wave(trigger: &mut Output) {
 }
 
 /// Reads the pulse width in microseconds, which is equal to the delay between waves
-fn measure_echo(echo: &Input, real_time_clock: &Rtc) -> Pulse {
+fn measure_echo(echo: &Input, real_time_clock: &Rtc) -> UltrasoundPulse {
     while echo.is_low() {}
     let start = real_time_clock.current_time_us();
     while echo.is_high() {}
     let end = real_time_clock.current_time_us();
 
-    Pulse {
+    UltrasoundPulse {
         width_microseconds: (end - start),
     }
 }
 
-struct Pulse {
+struct UltrasoundPulse {
     width_microseconds: u64,
 }
 
-impl Pulse {
+impl UltrasoundPulse {
     /// To calculate the distance, we need to use the pulse width.
     /// The pulse width tells us how long it took for the ultrasonic waves to
     /// travel to an obstacle and return.
@@ -168,18 +152,29 @@ impl Pulse {
     }
 }
 
-pub fn note_channel<'a>(
-    ledc: &Ledc<'a>,
-    timer: &'a Timer<'a, HighSpeed>,
-    output_pin: impl PeripheralOutput<'a>,
-) -> Channel<'a, HighSpeed> {
-    let mut channel1 = ledc.channel(channel::Number::Channel1, output_pin);
-    channel1
-        .configure(channel::config::Config {
-            timer,
-            duty_pct: 0,
-            drive_mode: DriveMode::PushPull,
-        })
-        .unwrap();
-    channel1
+/// Build the "note equivalent" of the brightness.
+///
+/// Assumption: brightness goes from 0 to 100.
+///
+/// The sound it produces is quite bad in practice though.
+fn _brightness_to_note_pulse(brightess_percent: u8) -> PulseCode {
+    if brightess_percent == 0 {
+        return PulseCode::new(Level::Low, 1, Level::Low, 1);
+    }
+
+    let darkest_note = Note::B0.rate().as_hz();
+    let brightest_note = Note::DS8.rate().as_hz();
+    let frequency_ratio = brightest_note as f32 / darkest_note as f32;
+
+    let brightness_ratio = (brightess_percent as f32 - 1.0) / (100.0 - 1.0);
+    // Notes don't have a linear distribution, so we need to weigh it down
+    let weighted_frequency = darkest_note as f32 * libm::powf(frequency_ratio, brightness_ratio);
+    let weighted_frequency = libm::roundf(weighted_frequency) as u16;
+
+    PulseCode::new(
+        Level::High,
+        weighted_frequency,
+        Level::Low,
+        weighted_frequency,
+    )
 }

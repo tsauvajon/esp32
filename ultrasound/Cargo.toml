@@ -21,6 +21,7 @@ esp-backtrace = { version = "0.18.1", features = [
 esp-hal = { version = "1.0.0", features = ["esp32", "log-04", "unstable"] }
 esp-println = { version = "0.16.1", features = ["esp32", "log-04"] }
 esp-rtos = { version = "0.2.0", features = ["embassy", "esp32", "log-04"] }
+libm = "0.2"
 log = "0.4.27"
 static_cell = "2.1.1"
 

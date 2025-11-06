@@ -1,15 +1,17 @@
 use esp_hal::{
     delay::Delay,
-    gpio::DriveMode,
+    gpio::{DriveMode, Level},
     ledc::{
         HighSpeed, Ledc,
         channel::{self, ChannelIFace},
         timer::{self, TimerIFace},
     },
     peripherals::Peripherals,
+    rmt::PulseCode,
     time::Rate,
 };
 
+#[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Note {
     B0,
     C1,
@@ -100,6 +102,8 @@ pub enum Note {
     CS8,
     D8,
     DS8,
+
+    Silence,
 }
 
 impl Note {
@@ -194,7 +198,24 @@ impl Note {
             Note::CS8 => 4435,
             Note::D8 => 4699,
             Note::DS8 => 4978,
+
+            Note::Silence => 1,
         })
+    }
+}
+
+impl From<Note> for PulseCode {
+    fn from(note: Note) -> Self {
+        if note == Note::Silence {
+            return PulseCode::new(Level::Low, 1, Level::Low, 1);
+        }
+
+        PulseCode::new(
+            Level::High,
+            note.rate().as_hz() as u16,
+            Level::Low,
+            note.rate().as_hz() as u16,
+        )
     }
 }
 
