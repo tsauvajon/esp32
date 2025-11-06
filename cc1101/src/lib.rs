@@ -1,12 +1,13 @@
 #![no_std]
 
 use cc1101::{
-    Cc1101, Modulation, PacketLength, RadioMode, SyncMode, lowlevel::types::AutoCalibration,
+    AddressFilter, Cc1101, Modulation, PacketLength, RadioMode, SyncMode,
+    lowlevel::types::AutoCalibration,
 };
 use embedded_hal_bus::spi::ExclusiveDevice;
 use esp_hal::{
     delay::Delay,
-    gpio::{Level, Output, OutputConfig},
+    gpio::{Level, Output, OutputConfig, Pull},
     peripherals::Peripherals,
     spi::{
         Mode,
@@ -17,10 +18,11 @@ use esp_hal::{
 use log::{error, info};
 
 pub fn run(peripherals: Peripherals) -> ! {
-    info!("Delaying initial start (2 seconds)");
-    Delay::new().delay_millis(2000);
+    info!("Delaying initial start (0.4 seconds)");
+    let delay = Delay::new();
+    delay.delay_millis(400);
 
-    let spi_bus = Spi::new(
+    let mut spi_bus = Spi::new(
         peripherals.SPI2,
         SpiMasterConfig::default()
             .with_frequency(Rate::from_khz(400))
@@ -30,40 +32,44 @@ pub fn run(peripherals: Peripherals) -> ! {
     .with_sck(peripherals.GPIO18)
     .with_miso(peripherals.GPIO19)
     .with_mosi(peripherals.GPIO23);
-    let chip_select = Output::new(peripherals.GPIO5, Level::High, OutputConfig::default());
-    let spi_device = ExclusiveDevice::new(spi_bus, chip_select, Delay::new()).unwrap();
 
-    info!("Configured the pins - now configuring the radio");
+    let mut data = [0x30 | 0x80, 0x00]; // SNOP | read
+    spi_bus.transfer(&mut data).unwrap();
+    info!("SNOP response: {data:X?}");
+
+    let chip_select = Output::new(
+        peripherals.GPIO5,
+        Level::High,
+        OutputConfig::default().with_pull(Pull::Up),
+    );
+    let spi_device = ExclusiveDevice::new(spi_bus, chip_select, Delay::new()).unwrap();
     let mut radio = Cc1101::new(spi_device).unwrap();
     let (partnum, version) = radio.get_hw_info().unwrap();
-    info!("CC1101 PARTNUM={:#X}, VERSION={:#X}", partnum, version);
+    info!("CC1101 PARTNUM={partnum:#X}, VERSION={version:#X}");
 
     radio.set_frequency(433_920_000).unwrap();
-    info!("Set frequence");
     radio.set_data_rate(38_383).unwrap();
-    info!("Set data rate");
     radio
         .set_modulation(Modulation::GaussianFrequencyShiftKeying)
         .unwrap();
-    info!("Set modulation");
     radio.set_chanbw(58_000).unwrap();
-    info!("Set chanbw");
     radio.set_deviation(20_000).unwrap();
-    info!("Set deviation");
-    radio.set_sync_mode(SyncMode::MatchPartial(0xD391)).unwrap();
-    info!("Set sync mode");
+    radio.set_sync_mode(SyncMode::Disabled).unwrap();
     radio.set_packet_length(PacketLength::Variable(61)).unwrap();
-    info!("Set packet length");
     radio
         .set_autocalibration(AutoCalibration::FromIdle)
         .unwrap();
-    info!("Set auto calibration");
+    radio.set_address_filter(AddressFilter::Disabled).unwrap();
+    info!("Configured the radio rules");
+
+    info!("Switching to RX...");
     radio.set_radio_mode(RadioMode::Receive).unwrap();
-    info!("Set receive mode");
+    info!("Now in RX mode");
 
     let mut addr: u8 = 0;
     let mut buffer = [0u8; 64];
     info!("Started the receiver");
+    radio.set_raw_mode().unwrap();
 
     loop {
         let len = match radio.receive(&mut addr, &mut buffer) {
