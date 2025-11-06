@@ -2,6 +2,7 @@
 
 pub mod notes;
 
+use critical_section::Mutex;
 use esp_hal::{
     delay::Delay,
     gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull},
@@ -48,8 +49,8 @@ pub fn run(peripherals: Peripherals) -> ! {
 
     // BUZZER
     let note_ds4 = Note::from_frequency(notes::NOTE_DS4 as u32).build_timer(&ledc);
-    let note_fs4 = Note::from_frequency(notes::NOTE_FS4 as u32).build_timer(&ledc);
-    let note_gs4 = Note::from_frequency(notes::NOTE_GS4 as u32).build_timer(&ledc);
+    let note_gs7 = Note::from_frequency(notes::NOTE_GS7 as u32).build_timer(&ledc);
+    let note_c8 = Note::from_frequency(notes::NOTE_C8 as u32).build_timer(&ledc);
 
     // Emit ultrasound waves
     let mut trigger = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());
@@ -72,14 +73,14 @@ pub fn run(peripherals: Peripherals) -> ! {
         led_channel.set_duty(brightness_pct).unwrap();
 
         let buzzer = Output::new(
-            unsafe { Peripherals::steal().GPIO27 },
+            unsafe { peripherals.GPIO27.clone_unchecked() },
             Level::Low,
             OutputConfig::default(),
         );
         match brightness_pct {
             1..=32 => play_note(&ledc, &note_ds4, buzzer).set_duty(50),
-            33..=65 => play_note(&ledc, &note_fs4, buzzer).set_duty(50),
-            66..=100 => play_note(&ledc, &note_gs4, buzzer).set_duty(50),
+            33..=65 => play_note(&ledc, &note_gs7, buzzer).set_duty(50),
+            66..=100 => play_note(&ledc, &note_c8, buzzer).set_duty(50),
             0 | 101.. => play_note(&ledc, &note_ds4, buzzer).set_duty(0),
         }
         .unwrap();
