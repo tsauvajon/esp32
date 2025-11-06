@@ -162,13 +162,13 @@ fn _brightness_to_note_pulse(brightess_percent: u8) -> PulseCode {
         return PulseCode::new(Level::Low, 1, Level::Low, 1);
     }
 
-    let darkest_note = Note::B0.rate().as_hz();
-    let brightest_note = Note::DS8.rate().as_hz();
-    let frequency_ratio = brightest_note as f32 / darkest_note as f32;
+    let darkest_note = Rate::from(Note::B0).as_hz() as f32;
+    let brightest_note = Rate::from(Note::DS8).as_hz() as f32;
+    let frequency_ratio = brightest_note / darkest_note;
 
     let brightness_ratio = (brightess_percent as f32 - 1.0) / (100.0 - 1.0);
     // Notes don't have a linear distribution, so we need to weigh it down
-    let weighted_frequency = darkest_note as f32 * libm::powf(frequency_ratio, brightness_ratio);
+    let weighted_frequency = darkest_note * libm::powf(frequency_ratio, brightness_ratio);
     let weighted_frequency = libm::roundf(weighted_frequency) as u16;
 
     PulseCode::new(
