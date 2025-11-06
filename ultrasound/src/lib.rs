@@ -2,15 +2,17 @@
 
 pub mod notes;
 
-use critical_section::Mutex;
 use esp_hal::{
     delay::Delay,
-    gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull},
+    gpio::{
+        DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull,
+        interconnect::PeripheralOutput,
+    },
     ledc::{
-        LSGlobalClkSource, Ledc, LowSpeed,
-        channel::{self, ChannelIFace, config::Config as ChannelConfig},
+        HighSpeed, LSGlobalClkSource, Ledc, LowSpeed,
+        channel::{self, Channel, ChannelIFace, config::Config as ChannelConfig},
         timer::{
-            self, LSClockSource, TimerIFace,
+            self, LSClockSource, Timer, TimerIFace,
             config::{Config as TimerConfig, Duty},
         },
     },
@@ -19,7 +21,7 @@ use esp_hal::{
     time::Rate,
 };
 
-use crate::notes::{Note, play_note};
+use crate::notes::Note;
 
 const MAX_USEFUL_DISTANCE_CM: f64 = 60.0;
 const SOUND_CM_PER_MICROSECOND: f64 = 0.0343;
@@ -48,9 +50,24 @@ pub fn run(peripherals: Peripherals) -> ! {
         .unwrap();
 
     // BUZZER
-    let note_ds4 = Note::from_frequency(notes::NOTE_DS4 as u32).build_timer(&ledc);
-    let note_gs7 = Note::from_frequency(notes::NOTE_GS7 as u32).build_timer(&ledc);
-    let note_c8 = Note::from_frequency(notes::NOTE_C8 as u32).build_timer(&ledc);
+    // let mut hstimer1 = ledc.timer::<HighSpeed>(timer::Number::Timer1);
+    // hstimer1
+    //     .configure(timer::config::Config {
+    //         duty: timer::config::Duty::Duty10Bit,
+    //         clock_source: timer::HSClockSource::APBClk,
+    //         frequency: Note::A1.rate(), // Will be replaced
+    //     })
+    //     .unwrap();
+    // let buzzer = Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default());
+    // let mut rmt = Rmt::new(peripherals.RMT, Note::A1.rate()).unwrap();
+    // let buzzer_channel = rmt
+    //     .channel0
+    //     .configure_tx(peripherals.GPIO27, TxChannelConfig::default())
+    //     .unwrap();
+    // buzzer_channel
+    //     .transmit(&[PulseCode::new(Level::High, 200, Level::Low, 50); 20])
+    //     .unwrap();
+    // let buzzer_channel = note_channel(&ledc, &hstimer1, buzzer);
 
     // Emit ultrasound waves
     let mut trigger = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());
@@ -72,18 +89,26 @@ pub fn run(peripherals: Peripherals) -> ! {
         // info!("Calculated a distance of {distance:.0} cm. Led brightness of {brightness_pct}%");
         led_channel.set_duty(brightness_pct).unwrap();
 
-        let buzzer = Output::new(
-            unsafe { peripherals.GPIO27.clone_unchecked() },
-            Level::Low,
-            OutputConfig::default(),
-        );
-        match brightness_pct {
-            1..=32 => play_note(&ledc, &note_ds4, buzzer).set_duty(50),
-            33..=65 => play_note(&ledc, &note_gs7, buzzer).set_duty(50),
-            66..=100 => play_note(&ledc, &note_c8, buzzer).set_duty(50),
-            0 | 101.. => play_note(&ledc, &note_ds4, buzzer).set_duty(0),
-        }
-        .unwrap();
+        let note = match brightness_pct {
+            1..=32 => Note::DS4,
+            33..=65 => Note::GS7,
+            66..=100 => Note::C8,
+            0 | 101.. => Note::A1,
+        };
+        let mut hstimer1 = ledc.timer::<HighSpeed>(timer::Number::Timer1);
+        hstimer1
+            .configure(timer::config::Config {
+                duty: timer::config::Duty::Duty10Bit,
+                clock_source: timer::HSClockSource::APBClk,
+                frequency: note.rate(),
+            })
+            .unwrap();
+        let buzzer_channel = note_channel(&ledc, &hstimer1, unsafe {
+            peripherals.GPIO27.clone_unchecked()
+        });
+        buzzer_channel
+            .set_duty(if brightness_pct == 0 { 0 } else { 50 })
+            .unwrap();
 
         Delay::new().delay_millis(10);
     }
@@ -141,4 +166,20 @@ impl Pulse {
     fn distance_cm(&self) -> f64 {
         (self.width_microseconds as f64 * SOUND_CM_PER_MICROSECOND) / ROUND_TRIP_SEGMENTS
     }
+}
+
+pub fn note_channel<'a>(
+    ledc: &Ledc<'a>,
+    timer: &'a Timer<'a, HighSpeed>,
+    output_pin: impl PeripheralOutput<'a>,
+) -> Channel<'a, HighSpeed> {
+    let mut channel1 = ledc.channel(channel::Number::Channel1, output_pin);
+    channel1
+        .configure(channel::config::Config {
+            timer,
+            duty_pct: 0,
+            drive_mode: DriveMode::PushPull,
+        })
+        .unwrap();
+    channel1
 }
