@@ -1,12 +1,12 @@
 use esp_hal::{
     delay::Delay,
-    gpio::{DriveMode, Level, Output, OutputConfig},
+    gpio::{DriveMode, interconnect::PeripheralOutput},
     ledc::{
         HighSpeed, Ledc,
-        channel::{self, ChannelIFace},
-        timer::{self, TimerIFace},
+        channel::{self, Channel, ChannelIFace},
+        timer::{self, Timer, TimerIFace},
     },
-    peripherals::Peripherals,
+    peripherals::{LEDC, Peripherals},
     time::Rate,
 };
 
@@ -214,10 +214,47 @@ impl Song {
     }
 }
 
-pub fn play_pink_panther(peripherals: Peripherals) {
-    // let buzzer = Output::new(peripherals.GPIO27, Level::Low, OutputConfig::default());
-    let mut buzzer = peripherals.GPIO27;
+pub struct Note {
+    frequency: Rate,
+}
 
+impl Note {
+    pub fn from_frequency(freq: u32) -> Self {
+        Self {
+            frequency: Rate::from_hz(freq),
+        }
+    }
+
+    pub fn build_timer<'a>(&self, ledc: &Ledc<'a>) -> Timer<'a, HighSpeed> {
+        let mut hstimer0 = ledc.timer::<HighSpeed>(timer::Number::Timer0);
+        hstimer0
+            .configure(timer::config::Config {
+                duty: timer::config::Duty::Duty10Bit,
+                clock_source: timer::HSClockSource::APBClk,
+                frequency: self.frequency,
+            })
+            .unwrap();
+        hstimer0
+    }
+}
+
+pub fn play_note<'a>(
+    ledc: &Ledc<'a>,
+    timer: &'a Timer<'a, HighSpeed>,
+    output_pin: impl PeripheralOutput<'a>,
+) -> Channel<'a, HighSpeed> {
+    let mut channel0 = ledc.channel(channel::Number::Channel0, output_pin);
+    channel0
+        .configure(channel::config::Config {
+            timer,
+            duty_pct: 50,
+            drive_mode: DriveMode::PushPull,
+        })
+        .unwrap();
+    channel0
+}
+
+pub fn play_pink_panther(peripherals: Peripherals) {
     let ledc = Ledc::new(peripherals.LEDC);
     let mut hstimer0 = ledc.timer::<HighSpeed>(timer::Number::Timer0);
 
