@@ -4,12 +4,12 @@ pub mod notes;
 
 use esp_hal::{
     delay::Delay,
-    gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, Pull},
+    gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, OutputPin, Pull},
     ledc::{
-        LSGlobalClkSource, Ledc, LowSpeed,
+        Ledc, LowSpeed,
         channel::{self, ChannelIFace, config::Config as ChannelConfig},
         timer::{
-            self, LSClockSource, TimerIFace,
+            self, LSClockSource, Timer, TimerIFace,
             config::{Config as TimerConfig, Duty},
         },
     },
@@ -27,10 +27,16 @@ const ROUND_TRIP_SEGMENTS: f64 = 2.0;
 const MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32: u32 = 80;
 
 pub fn run(peripherals: Peripherals) -> ! {
+    // Ultrasound
+    let mut trigger = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());
+    let echo = Input::new(
+        peripherals.GPIO18,
+        InputConfig::default().with_pull(Pull::Down),
+    );
+    let real_time_clock = Rtc::new(peripherals.LPWR);
+
     // LED
-    let led = Output::new(peripherals.GPIO32, Level::Low, OutputConfig::default());
-    let mut ledc = Ledc::new(peripherals.LEDC);
-    ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
+    let ledc = Ledc::new(peripherals.LEDC);
     let mut lstimer0 = ledc.timer::<LowSpeed>(timer::Number::Timer0);
     lstimer0
         .configure(TimerConfig {
@@ -39,14 +45,7 @@ pub fn run(peripherals: Peripherals) -> ! {
             frequency: Rate::from_khz(24),
         })
         .unwrap();
-    let mut led_channel = ledc.channel(channel::Number::Channel0, led);
-    led_channel
-        .configure(ChannelConfig {
-            timer: &lstimer0,
-            duty_pct: 10,
-            drive_mode: DriveMode::PushPull,
-        })
-        .unwrap();
+    let led_channel = ledc_channel(&ledc, peripherals.GPIO32, &lstimer0);
 
     // RMT Buzzer
     let rmt = Rmt::new(
@@ -64,19 +63,8 @@ pub fn run(peripherals: Peripherals) -> ! {
         .transmit_continuously(&[PulseCode::from(Note::Silence); 1], LoopMode::Infinite)
         .unwrap();
 
-    // Emit ultrasound waves
-    let mut trigger = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());
-
-    // Receive ultrasound waves
-    let echo = Input::new(
-        peripherals.GPIO18,
-        InputConfig::default().with_pull(Pull::Down),
-    );
-
-    let real_time_clock = Rtc::new(peripherals.LPWR);
-
     loop {
-        send_wave(&mut trigger);
+        send_ultrasound_wave(&mut trigger);
         let pulse = measure_echo(&echo, &real_time_clock);
         let distance = pulse.distance_cm();
 
@@ -91,8 +79,8 @@ pub fn run(peripherals: Peripherals) -> ! {
             76..=100 => Note::C4,
             0 | 101.. => Note::Silence,
         };
-        // Mutates the variable to always keep transmitting a note.
-        // On each loop iteration, stop transmitting and transmit a new note.
+        // Mutates the variable each loop so we can change the note we're
+        // transmitting to the buzzer.
         buzzer_tx = buzzer_tx
             .stop()
             .unwrap()
@@ -101,6 +89,23 @@ pub fn run(peripherals: Peripherals) -> ! {
 
         Delay::new().delay_millis(10);
     }
+}
+
+fn ledc_channel<'a>(
+    ledc: &'a Ledc,
+    led: impl OutputPin + 'a,
+    lstimer: &'a Timer<'a, LowSpeed>,
+) -> channel::Channel<'a, LowSpeed> {
+    let led = Output::new(led, Level::Low, OutputConfig::default());
+    let mut led_channel = ledc.channel(channel::Number::Channel0, led);
+    led_channel
+        .configure(ChannelConfig {
+            timer: lstimer,
+            duty_pct: 0,
+            drive_mode: DriveMode::PushPull,
+        })
+        .unwrap();
+    led_channel
 }
 
 fn brightness_percentage(distance: f64) -> u8 {
@@ -113,7 +118,7 @@ fn brightness_percentage(distance: f64) -> u8 {
     brightness.min(100)
 }
 
-fn send_wave(trigger: &mut Output<'_>) {
+fn send_ultrasound_wave(trigger: &mut Output<'_>) {
     let delay = Delay::new(); // TODO: take an `impl DelayNs` instead
 
     // Ensure the Trigger pin is low before starting
