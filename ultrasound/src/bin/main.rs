@@ -10,7 +10,7 @@ use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::main;
 use esp_hal::peripherals::Peripherals;
-use ultrasound::notes::{pink_panther, play_song};
+use ultrasound::notes::{pink_panther, play_song_with_rmt};
 use ultrasound::run;
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -26,7 +26,7 @@ fn main() -> ! {
 }
 
 fn _buzzer_demo(peripherals: Peripherals) {
-    play_song(peripherals, pink_panther::TEMPO, &pink_panther::MELODY);
+    play_song_with_rmt(peripherals, pink_panther::TEMPO, &pink_panther::MELODY);
     loop {
         esp_hal::delay::Delay::new().delay_millis(99999);
     }

@@ -7,9 +7,11 @@ use esp_hal::{
         timer::{self, TimerIFace},
     },
     peripherals::Peripherals,
-    rmt::PulseCode,
+    rmt::{ContinuousTxTransaction, LoopMode, PulseCode, Rmt, TxChannelConfig, TxChannelCreator},
     time::Rate,
 };
+
+use crate::MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32;
 
 pub mod pink_panther;
 
@@ -106,6 +108,15 @@ pub enum Note {
     DS8,
 
     Silence,
+}
+
+impl Note {
+    pub fn play<'ch>(&self, tx: ContinuousTxTransaction<'ch>) -> ContinuousTxTransaction<'ch> {
+        tx.stop()
+            .unwrap()
+            .transmit_continuously(&[self], LoopMode::Infinite)
+            .unwrap()
+    }
 }
 
 impl From<Note> for Rate {
@@ -217,6 +228,18 @@ impl From<Note> for PulseCode {
     }
 }
 
+impl From<&Note> for Rate {
+    fn from(note: &Note) -> Self {
+        Self::from(*note)
+    }
+}
+
+impl From<&Note> for PulseCode {
+    fn from(note: &Note) -> Self {
+        Self::from(*note)
+    }
+}
+
 pub struct Song {
     whole_note: u32,
 }
@@ -237,7 +260,41 @@ impl Song {
     }
 }
 
-pub fn play_song(peripherals: Peripherals, tempo: u16, melody: &[(Note, i16)]) {
+pub fn play_song_with_rmt(peripherals: Peripherals, tempo: u16, melody: &[(Note, i16)]) {
+    let rmt = Rmt::new(
+        peripherals.RMT,
+        Rate::from_mhz(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32),
+    )
+    .unwrap();
+    let buzzer_channel = TxChannelCreator::configure_tx(
+        rmt.channel2,
+        peripherals.GPIO27,
+        TxChannelConfig::default().with_clk_divider(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32 as u8), // 80 MHz / 80 = 1 MhZ clock
+    )
+    .unwrap();
+    let mut buzzer_tx = buzzer_channel
+        .transmit_continuously(&[Note::Silence], LoopMode::Infinite)
+        .unwrap();
+
+    let delay = Delay::new();
+    let song = Song::new(tempo);
+    for (note, duration_type) in melody {
+        let note_duration = song.calc_note_duration(*duration_type);
+        if *note == Note::Silence {
+            buzzer_tx = Note::Silence.play(buzzer_tx);
+            delay.delay_millis(note_duration);
+            continue;
+        }
+
+        buzzer_tx = note.play(buzzer_tx);
+        let pause_duration = note_duration / 10; // 10% of note_duration
+        delay.delay_millis(note_duration - pause_duration); // play 90%
+        buzzer_tx = Note::Silence.play(buzzer_tx);
+        delay.delay_millis(pause_duration); // Pause for 10%
+    }
+}
+
+pub fn _play_song_with_ledc(peripherals: Peripherals, tempo: u16, melody: &[(Note, i16)]) {
     let ledc = Ledc::new(peripherals.LEDC);
     let mut hstimer0 = ledc.timer::<HighSpeed>(timer::Number::Timer0);
 

@@ -79,13 +79,7 @@ pub fn run(peripherals: Peripherals) -> ! {
             76..=100 => Note::C4,
             0 | 101.. => Note::Silence,
         };
-        // Mutates the variable each loop so we can change the note we're
-        // transmitting to the buzzer.
-        buzzer_tx = buzzer_tx
-            .stop()
-            .unwrap()
-            .transmit_continuously(&[note], LoopMode::Infinite)
-            .unwrap();
+        buzzer_tx = note.play(buzzer_tx);
 
         Delay::new().delay_millis(10);
     }
