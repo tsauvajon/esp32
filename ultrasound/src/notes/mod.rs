@@ -15,7 +15,7 @@ use esp_hal::{
     time::Rate,
 };
 
-use crate::MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32;
+use crate::{HARDCODED_CLOCK_FREQUENCY, MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32};
 
 pub mod pink_panther;
 
@@ -251,13 +251,22 @@ impl From<Note> for Rate {
     }
 }
 
+/// A better implementation would:
+/// - move the silence implementation to the note-to-rate conversion (through Option)
+/// - take the clock frequency as a parameter
+///
+/// Having a direct `From` implementation doesn't make actual sense, it was a
+/// naive choice
 impl From<Note> for PulseCode {
     fn from(note: Note) -> Self {
         if note == Note::Silence {
             return PulseCode::new(Level::Low, 1, Level::Low, 1);
         }
 
-        let phase_ticks = Rate::from(note).as_hz() as u16;
+        let frequency = Rate::from(note).as_hz();
+        // This should be configurable instead
+        let period_ticks = HARDCODED_CLOCK_FREQUENCY / frequency;
+        let phase_ticks = (period_ticks / 2) as u16;
         PulseCode::new(Level::High, phase_ticks, Level::Low, phase_ticks)
     }
 }
@@ -283,8 +292,8 @@ pub struct Jukebox<'ch> {
     currently: Status<'ch>,
 }
 
-impl Jukebox<'_> {
-    pub fn new<'ch>(channel: Channel<'ch, Blocking, Tx>) -> Jukebox<'ch> {
+impl<'ch> Jukebox<'ch> {
+    pub fn new(channel: Channel<'ch, Blocking, Tx>) -> Jukebox<'ch> {
         Jukebox {
             currently: Status::Stopped(channel),
         }
@@ -347,7 +356,7 @@ impl Song {
     }
 }
 
-pub fn play_song_with_rmt(peripherals: Peripherals, tempo: u16, melody: &[(Note, i16)]) {
+pub fn _play_song_with_rmt(peripherals: Peripherals, tempo: u16, melody: &[(Note, i16)]) {
     let rmt = Rmt::new(
         peripherals.RMT,
         Rate::from_mhz(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32),
@@ -374,7 +383,7 @@ pub fn play_song_with_rmt(peripherals: Peripherals, tempo: u16, melody: &[(Note,
     }
 }
 
-pub fn play_song_with_ledc(peripherals: Peripherals, tempo: u16, melody: &[(Note, i16)]) {
+pub fn _play_song_with_ledc(peripherals: Peripherals, tempo: u16, melody: &[(Note, i16)]) {
     let ledc = Ledc::new(peripherals.LEDC);
     let mut hstimer0 = ledc.timer::<HighSpeed>(timer::Number::Timer0);
 

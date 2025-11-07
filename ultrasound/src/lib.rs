@@ -6,7 +6,7 @@ use esp_hal::{
     delay::Delay,
     gpio::{DriveMode, Input, InputConfig, Level, Output, OutputConfig, OutputPin, Pull},
     ledc::{
-        Ledc, LowSpeed,
+        LSGlobalClkSource, Ledc, LowSpeed,
         channel::{self, ChannelIFace, config::Config as ChannelConfig},
         timer::{
             self, LSClockSource, Timer, TimerIFace,
@@ -27,6 +27,7 @@ const ROUND_TRIP_SEGMENTS: f64 = 2.0;
 
 // Note: on ESP32 and ESP32-S2 you cannot specify a base frequency other than 80 MHz
 const MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32: u32 = 80;
+const HARDCODED_CLOCK_FREQUENCY: u32 = 1_000_000;
 
 pub fn run_rear_parking_sensor(peripherals: Peripherals) -> ! {
     // Ultrasound
@@ -38,7 +39,8 @@ pub fn run_rear_parking_sensor(peripherals: Peripherals) -> ! {
     let real_time_clock = Rtc::new(peripherals.LPWR);
 
     // LED
-    let ledc = Ledc::new(peripherals.LEDC);
+    let mut ledc = Ledc::new(peripherals.LEDC);
+    ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
     let mut lstimer0 = ledc.timer::<LowSpeed>(timer::Number::Timer0);
     lstimer0
         .configure(TimerConfig {
@@ -58,7 +60,7 @@ pub fn run_rear_parking_sensor(peripherals: Peripherals) -> ! {
     let buzzer_channel = TxChannelCreator::configure_tx(
         rmt.channel2,
         peripherals.GPIO27,
-        TxChannelConfig::default().with_clk_divider(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32 as u8), // 80 MHz / 80 = 1 MhZ clock
+        TxChannelConfig::default().with_clk_divider(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32 as u8), // 80 MHz / 80 = 1 MHz clock
     )
     .unwrap();
     let mut jukebox = Jukebox::new(buzzer_channel);
@@ -69,7 +71,9 @@ pub fn run_rear_parking_sensor(peripherals: Peripherals) -> ! {
         let distance = pulse.distance_cm();
 
         let brightness_pct = brightness_percentage(distance);
-        // info!("Calculated a distance of {distance:.0} cm. Led brightness of {brightness_pct}%");
+        // log::info!(
+        //     "Calculated a distance of {distance:.0} cm. Led brightness of {brightness_pct}%"
+        // );
         led_channel.set_duty(brightness_pct).unwrap();
 
         let note = match brightness_pct {
@@ -95,7 +99,7 @@ fn ledc_channel<'a>(
     led_channel
         .configure(ChannelConfig {
             timer: lstimer,
-            duty_pct: 0,
+            duty_pct: 10,
             drive_mode: DriveMode::PushPull,
         })
         .unwrap();

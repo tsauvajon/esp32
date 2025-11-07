@@ -10,7 +10,7 @@ use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::main;
 use esp_hal::peripherals::Peripherals;
-use ultrasound::notes::{pink_panther, play_song_with_ledc, play_song_with_rmt};
+use ultrasound::notes::{_play_song_with_rmt, pink_panther};
 use ultrasound::run_rear_parking_sensor;
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -22,12 +22,12 @@ fn main() -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    _buzzer_demo(peripherals);
-    // run_rear_parking_sensor(peripherals);
+    // _buzzer_demo(peripherals);
+    run_rear_parking_sensor(peripherals);
 }
 
 fn _buzzer_demo(peripherals: Peripherals) -> ! {
-    play_song_with_rmt(peripherals, pink_panther::TEMPO, &pink_panther::MELODY);
+    _play_song_with_rmt(peripherals, pink_panther::TEMPO, &pink_panther::MELODY);
     // play_song_with_ledc(peripherals, pink_panther::TEMPO, &pink_panther::MELODY);
     loop {
         esp_hal::delay::Delay::new().delay_millis(99999);
