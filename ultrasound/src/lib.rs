@@ -19,14 +19,16 @@ use esp_hal::{
     time::Rate,
 };
 
-use crate::notes::Note;
+use crate::notes::{Jukebox, Note};
 
 const MAX_USEFUL_DISTANCE_CM: f64 = 60.0;
 const SOUND_CM_PER_MICROSECOND: f64 = 0.0343;
 const ROUND_TRIP_SEGMENTS: f64 = 2.0;
+
+// Note: on ESP32 and ESP32-S2 you cannot specify a base frequency other than 80 MHz
 const MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32: u32 = 80;
 
-pub fn run(peripherals: Peripherals) -> ! {
+pub fn run_rear_parking_sensor(peripherals: Peripherals) -> ! {
     // Ultrasound
     let mut trigger = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());
     let echo = Input::new(
@@ -59,7 +61,7 @@ pub fn run(peripherals: Peripherals) -> ! {
         TxChannelConfig::default().with_clk_divider(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32 as u8), // 80 MHz / 80 = 1 MhZ clock
     )
     .unwrap();
-    let mut buzzer_tx = Note::Silence.play_in(buzzer_channel).unwrap();
+    let mut jukebox = Jukebox::new(buzzer_channel);
 
     loop {
         send_ultrasound_wave(&mut trigger);
@@ -77,7 +79,7 @@ pub fn run(peripherals: Peripherals) -> ! {
             76..=100 => Note::C6,
             0 | 101.. => Note::Silence,
         };
-        buzzer_tx = note.replace_in(buzzer_tx).unwrap();
+        jukebox = jukebox.play_note(note).unwrap();
 
         Delay::new().delay_millis(10);
     }
@@ -159,6 +161,7 @@ impl UltrasoundPulse {
 /// Assumption: brightness goes from 0 to 100.
 ///
 /// The sound it produces is quite bad in practice though.
+#[deprecated]
 fn _brightness_to_note_pulse(brightess_percent: u8) -> PulseCode {
     if brightess_percent == 0 {
         return PulseCode::new(Level::Low, 1, Level::Low, 1);

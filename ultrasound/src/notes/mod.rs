@@ -21,6 +21,8 @@ pub mod pink_panther;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum Note {
+    Silence,
+
     B0,
     C1,
     CS1,
@@ -110,15 +112,8 @@ pub enum Note {
     CS8,
     D8,
     DS8,
-
-    Silence,
 }
 
-/// Both methods there are a bit in reverse; it'd make more sense to write
-/// `channel.play(note)` and `tx.replace_with(note)` than the current
-/// `note.play_in(channel)` and `note.replace_in(tx)`.
-///
-/// TODO: create a Jukebox type that allows doing this.
 impl Note {
     /// Start playing a note on a RMT channel
     ///
@@ -130,7 +125,10 @@ impl Note {
     /// super hard but adds a bit more complexity to the code we don't have
     /// to deal with, with the `LoopMode::Infinite` approach. It does sound
     /// more robust and controlled, though - especially when playing a song.
-    pub fn play_in<'ch>(
+    ///
+    /// Replaced with `Jukebox::play_note`, kept here for documentation.
+    #[deprecated]
+    pub fn _play_in<'ch>(
         &self,
         channel: Channel<'ch, Blocking, Tx>,
     ) -> Result<ContinuousTxTransaction<'ch>, RmtError> {
@@ -138,20 +136,28 @@ impl Note {
     }
 
     /// Stop the current note transmission, and start a new one on the same channel
-    pub fn replace_in<'ch>(
+    ///
+    /// Replaced with `Jukebox::play_note`, kept here for documentation.
+    #[deprecated]
+    pub fn _replace_in<'ch>(
         &self,
         tx: ContinuousTxTransaction<'ch>,
     ) -> Result<ContinuousTxTransaction<'ch>, RmtError> {
         // I don't want to deal with the complexity of returning the channel
         // everywhere in the code on err
         let channel = tx.stop().map_err(|(err, _channel)| err)?;
-        self.play_in(channel)
+        #[allow(deprecated)] // This method itself is deprecated - it's normal
+        // for it to call other deprecated methods.
+        self._play_in(channel)
     }
 }
 
 impl From<Note> for Rate {
     fn from(note: Note) -> Self {
         Rate::from_hz(match note {
+            // TODO: `None` is the correct response - do that instead
+            Note::Silence => 1,
+
             Note::B0 => 31,
             Note::C1 => 33,
             Note::CS1 => 35,
@@ -241,8 +247,6 @@ impl From<Note> for Rate {
             Note::CS8 => 4435,
             Note::D8 => 4699,
             Note::DS8 => 4978,
-
-            Note::Silence => 1,
         })
     }
 }
@@ -267,6 +271,59 @@ impl From<&Note> for Rate {
 impl From<&Note> for PulseCode {
     fn from(note: &Note) -> Self {
         Self::from(*note)
+    }
+}
+
+pub enum Status<'ch> {
+    Stopped(Channel<'ch, Blocking, Tx>),
+    Playing(ContinuousTxTransaction<'ch>),
+}
+
+pub struct Jukebox<'ch> {
+    currently: Status<'ch>,
+}
+
+impl Jukebox<'_> {
+    pub fn new<'ch>(channel: Channel<'ch, Blocking, Tx>) -> Jukebox<'ch> {
+        Jukebox {
+            currently: Status::Stopped(channel),
+        }
+    }
+}
+
+impl<'ch> Jukebox<'ch> {
+    pub fn play_note(self, note: Note) -> Result<Jukebox<'ch>, RmtError> {
+        match self.currently {
+            Status::Stopped(channel) => {
+                let tx = channel.transmit_continuously(&[note], LoopMode::Infinite)?;
+                Ok(Jukebox {
+                    currently: Status::Playing(tx),
+                })
+            }
+            Status::Playing(tx) => {
+                // Can't think of a way to return the channel on error
+                // without using `unsafe` => jukebox just dies on any error
+                let channel = tx.stop().map_err(|(err, _channel)| err)?;
+                Jukebox {
+                    currently: Status::Stopped(channel),
+                }
+                .play_note(note)
+            }
+        }
+    }
+
+    pub fn stop(self) -> Result<Jukebox<'ch>, RmtError> {
+        match self.currently {
+            Status::Stopped(channel) => Ok(Jukebox {
+                currently: Status::Stopped(channel),
+            }),
+            Status::Playing(tx) => {
+                let channel = tx.stop().map_err(|(err, _channel)| err)?;
+                Ok(Jukebox {
+                    currently: Status::Stopped(channel),
+                })
+            }
+        }
     }
 }
 
@@ -303,26 +360,21 @@ pub fn play_song_with_rmt(peripherals: Peripherals, tempo: u16, melody: &[(Note,
     )
     .unwrap();
 
-    let mut buzzer_tx = Note::Silence.play_in(buzzer_channel).unwrap();
+    let mut jukebox = Jukebox::new(buzzer_channel);
     let delay = Delay::new();
     let song = Song::new(tempo);
     for (note, duration_type) in melody {
         let note_duration = song.calc_note_duration(*duration_type);
-        if *note == Note::Silence {
-            buzzer_tx = Note::Silence.replace_in(buzzer_tx).unwrap();
-            delay.delay_millis(note_duration);
-            continue;
-        }
 
-        buzzer_tx = note.replace_in(buzzer_tx).unwrap();
+        jukebox = jukebox.play_note(*note).unwrap();
         let pause_duration = note_duration / 10; // 10% of note_duration
         delay.delay_millis(note_duration - pause_duration); // play 90%
-        buzzer_tx = Note::Silence.replace_in(buzzer_tx).unwrap();
+        jukebox = jukebox.play_note(Note::Silence).unwrap();
         delay.delay_millis(pause_duration); // Pause for 10%
     }
 }
 
-pub fn _play_song_with_ledc(peripherals: Peripherals, tempo: u16, melody: &[(Note, i16)]) {
+pub fn play_song_with_ledc(peripherals: Peripherals, tempo: u16, melody: &[(Note, i16)]) {
     let ledc = Ledc::new(peripherals.LEDC);
     let mut hstimer0 = ledc.timer::<HighSpeed>(timer::Number::Timer0);
 
