@@ -31,8 +31,8 @@ const HARDCODED_CLOCK_FREQUENCY: u32 = 1_000_000;
 
 pub fn run_rear_parking_sensor(peripherals: Peripherals) -> ! {
     let lpwr = peripherals.LPWR;
-    let trigger = peripherals.GPIO5;
-    let echo = peripherals.GPIO18;
+    let trigger = peripherals.GPIO4;
+    let echo = peripherals.GPIO25;
     let ledc = peripherals.LEDC;
     let led = peripherals.GPIO32;
     let rmt = peripherals.RMT;
