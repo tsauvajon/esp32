@@ -9,8 +9,8 @@ use esp_hal::{
     },
     peripherals::Peripherals,
     rmt::{
-        Channel, ContinuousTxTransaction, LoopMode, PulseCode, Rmt, Tx, TxChannelConfig,
-        TxChannelCreator,
+        Channel, ContinuousTxTransaction, Error as RmtError, LoopMode, PulseCode, Rmt, Tx,
+        TxChannelConfig, TxChannelCreator,
     },
     time::Rate,
 };
@@ -121,21 +121,30 @@ pub enum Note {
 /// TODO: create a Jukebox type that allows doing this.
 impl Note {
     /// Start playing a note on a RMT channel
+    ///
+    /// We could also think of taking in a "duration" parameter, and then use
+    /// either a regular `transmit`, which has the advantage of also working
+    /// with async, or `transmit_continuously` with a `LoopMode::Finite`.
+    ///
+    /// We'd need a different number of phases for each note, which is not
+    /// super hard but adds a bit more complexity to the code we don't have
+    /// to deal with, with the `LoopMode::Infinite` approach. It does sound
+    /// more robust and controlled, though - especially when playing a song.
     pub fn play_in<'ch>(
         &self,
         channel: Channel<'ch, Blocking, Tx>,
-    ) -> ContinuousTxTransaction<'ch> {
-        channel
-            .transmit_continuously(&[self], LoopMode::Infinite)
-            .unwrap()
+    ) -> Result<ContinuousTxTransaction<'ch>, RmtError> {
+        channel.transmit_continuously(&[self], LoopMode::Infinite)
     }
 
     /// Stop the current note transmission, and start a new one on the same channel
     pub fn replace_in<'ch>(
         &self,
         tx: ContinuousTxTransaction<'ch>,
-    ) -> ContinuousTxTransaction<'ch> {
-        let channel = tx.stop().unwrap();
+    ) -> Result<ContinuousTxTransaction<'ch>, RmtError> {
+        // I don't want to deal with the complexity of returning the channel
+        // everywhere in the code on err
+        let channel = tx.stop().map_err(|(err, _channel)| err)?;
         self.play_in(channel)
     }
 }
@@ -294,21 +303,21 @@ pub fn play_song_with_rmt(peripherals: Peripherals, tempo: u16, melody: &[(Note,
     )
     .unwrap();
 
-    let mut buzzer_tx = Note::Silence.play_in(buzzer_channel);
+    let mut buzzer_tx = Note::Silence.play_in(buzzer_channel).unwrap();
     let delay = Delay::new();
     let song = Song::new(tempo);
     for (note, duration_type) in melody {
         let note_duration = song.calc_note_duration(*duration_type);
         if *note == Note::Silence {
-            buzzer_tx = Note::Silence.replace_in(buzzer_tx);
+            buzzer_tx = Note::Silence.replace_in(buzzer_tx).unwrap();
             delay.delay_millis(note_duration);
             continue;
         }
 
-        buzzer_tx = note.replace_in(buzzer_tx);
+        buzzer_tx = note.replace_in(buzzer_tx).unwrap();
         let pause_duration = note_duration / 10; // 10% of note_duration
         delay.delay_millis(note_duration - pause_duration); // play 90%
-        buzzer_tx = Note::Silence.replace_in(buzzer_tx);
+        buzzer_tx = Note::Silence.replace_in(buzzer_tx).unwrap();
         delay.delay_millis(pause_duration); // Pause for 10%
     }
 }

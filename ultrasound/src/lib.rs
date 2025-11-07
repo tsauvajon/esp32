@@ -59,7 +59,7 @@ pub fn run(peripherals: Peripherals) -> ! {
         TxChannelConfig::default().with_clk_divider(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32 as u8), // 80 MHz / 80 = 1 MhZ clock
     )
     .unwrap();
-    let mut buzzer_tx = Note::Silence.play_in(buzzer_channel);
+    let mut buzzer_tx = Note::Silence.play_in(buzzer_channel).unwrap();
 
     loop {
         send_ultrasound_wave(&mut trigger);
@@ -77,7 +77,7 @@ pub fn run(peripherals: Peripherals) -> ! {
             76..=100 => Note::C4,
             0 | 101.. => Note::Silence,
         };
-        buzzer_tx = note.replace_in(buzzer_tx);
+        buzzer_tx = note.replace_in(buzzer_tx).unwrap();
 
         Delay::new().delay_millis(10);
     }
