@@ -71,10 +71,10 @@ pub fn run(peripherals: Peripherals) -> ! {
         led_channel.set_duty(brightness_pct).unwrap();
 
         let note = match brightness_pct {
-            1..=25 => Note::C6,
-            26..=50 => Note::A4,
-            51..=75 => Note::E4,
-            76..=100 => Note::C4,
+            1..=25 => Note::C4,
+            26..=50 => Note::E4,
+            51..=75 => Note::A4,
+            76..=100 => Note::C6,
             0 | 101.. => Note::Silence,
         };
         buzzer_tx = note.replace_in(buzzer_tx).unwrap();

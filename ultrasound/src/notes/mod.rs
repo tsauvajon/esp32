@@ -115,8 +115,8 @@ pub enum Note {
 }
 
 /// Both methods there are a bit in reverse; it'd make more sense to write
-/// `channel.play(note)` and `tx.replace(note)` than `note.play_in(channel)`
-/// and `note.replace_in(tx)`.
+/// `channel.play(note)` and `tx.replace_with(note)` than the current
+/// `note.play_in(channel)` and `note.replace_in(tx)`.
 ///
 /// TODO: create a Jukebox type that allows doing this.
 impl Note {
