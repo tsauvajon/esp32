@@ -30,16 +30,21 @@ const MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32: u32 = 80;
 const HARDCODED_CLOCK_FREQUENCY: u32 = 1_000_000;
 
 pub fn run_rear_parking_sensor(peripherals: Peripherals) -> ! {
+    let lpwr = peripherals.LPWR;
+    let trigger = peripherals.GPIO5;
+    let echo = peripherals.GPIO18;
+    let ledc = peripherals.LEDC;
+    let led = peripherals.GPIO32;
+    let rmt = peripherals.RMT;
+    let buzzer = peripherals.GPIO27;
+
     // Ultrasound
-    let mut trigger = Output::new(peripherals.GPIO5, Level::Low, OutputConfig::default());
-    let echo = Input::new(
-        peripherals.GPIO18,
-        InputConfig::default().with_pull(Pull::Down),
-    );
-    let real_time_clock = Rtc::new(peripherals.LPWR);
+    let mut trigger = Output::new(trigger, Level::Low, OutputConfig::default());
+    let echo = Input::new(echo, InputConfig::default().with_pull(Pull::Down));
+    let real_time_clock = Rtc::new(lpwr);
 
     // LED
-    let mut ledc = Ledc::new(peripherals.LEDC);
+    let mut ledc = Ledc::new(ledc);
     ledc.set_global_slow_clock(LSGlobalClkSource::APBClk);
     let mut lstimer0 = ledc.timer::<LowSpeed>(timer::Number::Timer0);
     lstimer0
@@ -49,17 +54,13 @@ pub fn run_rear_parking_sensor(peripherals: Peripherals) -> ! {
             frequency: Rate::from_khz(24),
         })
         .unwrap();
-    let led_channel = ledc_channel(&ledc, peripherals.GPIO32, &lstimer0);
+    let led_channel = ledc_channel(&ledc, led, &lstimer0);
 
     // RMT Buzzer
-    let rmt = Rmt::new(
-        peripherals.RMT,
-        Rate::from_mhz(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32),
-    )
-    .unwrap();
+    let rmt = Rmt::new(rmt, Rate::from_mhz(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32)).unwrap();
     let buzzer_channel = TxChannelCreator::configure_tx(
         rmt.channel2,
-        peripherals.GPIO27,
+        buzzer,
         TxChannelConfig::default().with_clk_divider(MANDATORY_RMT_MHZ_FREQUENCY_FOR_ESP32 as u8), // 80 MHz / 80 = 1 MHz clock
     )
     .unwrap();
