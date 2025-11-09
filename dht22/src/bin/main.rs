@@ -10,7 +10,7 @@ use embedded_dht_rs::dht22::Dht22;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
-use esp_hal::gpio::{DriveMode, Flex, Level, OutputConfig, Pull};
+use esp_hal::gpio::{DriveMode, Flex, InputConfig, OutputConfig, Pull};
 use esp_hal::main;
 use esp_hal::peripherals::Peripherals;
 use log::info;
@@ -34,16 +34,17 @@ fn main() -> ! {
 
 fn humidity_and_temperature(peripherals: Peripherals) -> ! {
     // Flex = InputOutput
-    let mut io = Flex::new(peripherals.GPIO5);
-    io.set_level(Level::High);
+    let mut io = Flex::new(peripherals.GPIO32);
+    io.apply_input_config(&InputConfig::default().with_pull(Pull::Up));
     io.apply_output_config(
         &OutputConfig::default()
-            .with_drive_mode(DriveMode::OpenDrain)
-            .with_pull(Pull::Up),
+            .with_drive_mode(DriveMode::PushPull)
+            .with_pull(Pull::None),
     );
-    // io.set_input_enable(true);
+    io.set_input_enable(true);
+    io.set_high();
 
-    _read_temp(&mut io);
+    _test(&mut io);
 }
 
 fn _read_temp(io: &mut Flex) -> ! {
@@ -51,20 +52,20 @@ fn _read_temp(io: &mut Flex) -> ! {
     let mut dht22 = Dht22::new(io, &mut delay);
 
     loop {
-        Delay::new().delay_millis(1_000);
+        Delay::new().delay_millis(5_000);
         match dht22.read() {
             Ok(sensor_reading) => log::info!(
                 "DHT 22 Sensor - Temperature: {} °C, humidity: {} %",
                 sensor_reading.temperature,
                 sensor_reading.humidity
             ),
-            Err(error) => log::error!("An error occurred while trying to read sensor: {error:?}"),
+            Err(error) => log::error!("An error occurred while trying to read sensor: {:?}", error),
         }
     }
 }
 
 fn _test(io: &mut Flex) -> ! {
-    Delay::new().delay_millis(1_000);
+    Delay::new().delay_millis(5_000);
     log::info!("Starting");
 
     io.set_low();
@@ -75,14 +76,12 @@ fn _test(io: &mut Flex) -> ! {
     loop {
         for _ in 0..20 {
             if io.is_high() {
-                log::info!("Read HIGH");
+                log::info!("GPIO32 HIGH");
             } else {
-                log::info!("Read LOW");
+                log::info!("GPIO32 LOW");
             }
             Delay::new().delay_millis(1);
         }
-
-        Delay::new().delay_millis(500);
 
         log::info!("---")
     }
