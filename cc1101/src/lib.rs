@@ -23,9 +23,10 @@ pub fn run(peripherals: Peripherals) -> ! {
     delay.delay_millis(400);
 
     let mut spi_bus = Spi::new(
-        peripherals.SPI2,
+        peripherals.SPI3, // GPIO5, GPIO18, GPIO19, and GPIO21 to GPIO23
         SpiMasterConfig::default()
-            .with_frequency(Rate::from_khz(400))
+            // https://esp32.implrust.com/spi/esp32-spi.html
+            .with_frequency(Rate::from_mhz(60))
             .with_mode(Mode::_0),
     )
     .unwrap()
@@ -39,13 +40,12 @@ pub fn run(peripherals: Peripherals) -> ! {
 
     let chip_select = Output::new(
         peripherals.GPIO5,
-        Level::High,
+        Level::Low,
         OutputConfig::default().with_pull(Pull::Up),
     );
     let spi_device = ExclusiveDevice::new(spi_bus, chip_select, Delay::new()).unwrap();
     let mut radio = Cc1101::new(spi_device).unwrap();
-    let (partnum, version) = radio.get_hw_info().unwrap();
-    info!("CC1101 PARTNUM={partnum:#X}, VERSION={version:#X}");
+    radio.reset().unwrap();
 
     radio.set_frequency(433_920_000).unwrap();
     radio.set_data_rate(38_383).unwrap();
@@ -66,10 +66,13 @@ pub fn run(peripherals: Peripherals) -> ! {
     radio.set_radio_mode(RadioMode::Receive).unwrap();
     info!("Now in RX mode");
 
+    let (partnum, version) = radio.get_hw_info().unwrap();
+    info!("CC1101 PARTNUM={partnum:#X}, VERSION={version:#X}");
+
     let mut addr: u8 = 0;
     let mut buffer = [0u8; 64];
     info!("Started the receiver");
-    radio.set_raw_mode().unwrap();
+    // radio.set_raw_mode().unwrap();
 
     loop {
         let len = match radio.receive(&mut addr, &mut buffer) {
