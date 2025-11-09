@@ -15,7 +15,7 @@ use esp_hal::peripherals::Peripherals;
 use esp_hal::time::{Duration, Rate};
 use log::{error, info};
 use sht31::mode::Sht31Reader;
-use sht31::{SHT31, TemperatureUnit};
+use sht31::{Reading, SHT31, TemperatureUnit};
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -51,7 +51,10 @@ fn run(peripherals: Peripherals) -> ! {
     info!("Hello world!");
     loop {
         match sht.read() {
-            Ok(data) => info!("Data: {data:?}"),
+            Ok(Reading {
+                temperature,
+                humidity,
+            }) => info!("{temperature:.1}°C / {humidity:.0}% humidity"),
             Err(err) => error!("Reading: {err}"),
         }
 
