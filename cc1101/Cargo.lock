@@ -58,8 +58,7 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 [[package]]
 name = "cc1101"
 version = "0.1.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a9f33a6177244f9d852d239372c810a3648169cedca2fcdf55d2f5986818e2d"
+source = "git+https://github.com/SebKuzminsky/cc1101#1c349add4193bc1678ae502ed4dca77fe8ec4fdc"
 dependencies = [
  "embedded-hal 1.0.0",
 ]

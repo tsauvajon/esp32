@@ -20,7 +20,7 @@ esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32", "log-04"] }
 esp-hal = { version = "1.0.0", features = ["esp32", "log-04", "unstable"] }
 esp-println = { version = "0.16.1", features = ["esp32", "log-04"] }
 log = "0.4.27"
-cc1101 = "0.1.3"
+cc1101 = { git = "https://github.com/SebKuzminsky/cc1101" } # TODO: fork and implement sending data
 
 [profile.dev]
 # Rust debug is too slow.

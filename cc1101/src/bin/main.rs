@@ -6,7 +6,7 @@
     holding buffers for the duration of a data transfer."
 )]
 
-use cc1101_receiver::run;
+use cc1101_receiver::read_data::run;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::main;
