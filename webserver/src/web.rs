@@ -1,0 +1,61 @@
+use embassy_net::Stack;
+use embassy_time::{Delay, Duration};
+use picoserve::{
+    AppBuilder, AppRouter, Config, Router, Server, Timeouts, make_static, response::File, routing,
+};
+
+pub const WEB_TASK_POOL_SIZE: usize = 2;
+
+pub struct Application;
+
+impl AppBuilder for Application {
+    type PathRouter = impl routing::PathRouter;
+
+    fn build_app(self) -> Router<Self::PathRouter> {
+        Router::new().route(
+            "/",
+            routing::get_service(File::html(include_str!("index.html"))),
+        )
+    }
+}
+
+pub struct WebApp {
+    pub router: &'static Router<<Application as AppBuilder>::PathRouter>,
+    pub config: &'static Config<Duration>,
+}
+
+impl Default for WebApp {
+    fn default() -> Self {
+        let router = make_static!(AppRouter<Application>, Application.build_app());
+        let config = make_static!(
+            Config<Duration>,
+            Config::new(Timeouts {
+                start_read_request: Some(Duration::from_secs(5)),
+                persistent_start_read_request: Some(Duration::from_secs(5)),
+                read_request: Some(Duration::from_secs(1)),
+                write: Some(Duration::from_secs(1)),
+            })
+        );
+
+        Self { router, config }
+    }
+}
+
+#[embassy_executor::task(pool_size = WEB_TASK_POOL_SIZE)]
+pub async fn web_task(
+    id: usize,
+    stack: Stack<'static>,
+    router: &'static AppRouter<Application>,
+    config: &'static Config<Duration>,
+) {
+    let port = 80;
+    let mut tcp_rx_buffer = [0; 1024];
+    let mut tcp_tx_buffer = [0; 1024];
+    let mut http_buffer = [0; 2048];
+
+    let server = Server::new(router, &config, &mut http_buffer);
+
+    server
+        .listen_and_serve(id, stack, port, &mut tcp_rx_buffer, &mut tcp_tx_buffer)
+        .await;
+}

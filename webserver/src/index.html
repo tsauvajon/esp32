@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ESP32 Control Panel</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Courier New", Consolas, monospace;
+    }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top, #2d2d3a, #09090d 60%);
+      color: #e0e8ff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .panel {
+      width: min(480px, 90vw);
+      background: #14141d;
+      border: 1px solid #3c3c4a;
+      box-shadow: 0 0 20px rgba(0, 0, 0, 0.6);
+      border-radius: 14px;
+      padding: 32px;
+    }
+    h1 {
+      margin: 0 0 18px;
+      font-size: 1.5rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: #7de3ff;
+    }
+    p {
+      margin: 0 0 16px;
+      color: #a1abc8;
+    }
+    .ascii {
+      background: #0b0b12;
+      border: 1px dashed #55556b;
+      border-radius: 10px;
+      padding: 18px;
+      margin: 24px 0;
+      font-size: 0.88rem;
+      line-height: 1.4;
+      color: #d8dcff;
+      white-space: pre;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .pulse-green {
+      animation: glow-green 700ms ease;
+    }
+    .pulse-red {
+      animation: glow-red 700ms ease;
+    }
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    button {
+      flex: 1;
+      padding: 12px 16px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      color: #0c111f;
+      cursor: pointer;
+      transition: transform 0.1s ease, box-shadow 0.1s ease;
+    }
+    .primary {
+      background: linear-gradient(120deg, #7de3ff, #47a4ff);
+      box-shadow: 0 6px 15px rgba(71, 164, 255, 0.35);
+    }
+    .danger {
+      background: linear-gradient(120deg, #ff8a7a, #fb4c52);
+      box-shadow: 0 6px 15px rgba(251, 76, 82, 0.35);
+    }
+    button:active {
+      transform: translateY(1px);
+      box-shadow: none;
+    }
+    @keyframes glow-green {
+      0% { box-shadow: 0 0 0 rgba(125, 227, 255, 0); border-color: #55556b; }
+      40% { box-shadow: 0 0 25px rgba(125, 227, 153, 0.55); border-color: #74ffbf; }
+      100% { box-shadow: 0 0 0 rgba(125, 227, 153, 0); border-color: #55556b; }
+    }
+    @keyframes glow-red {
+      0% { box-shadow: 0 0 0 rgba(255, 140, 122, 0); border-color: #55556b; }
+      40% { box-shadow: 0 0 25px rgba(255, 76, 82, 0.55); border-color: #ff8a7a; }
+      100% { box-shadow: 0 0 0 rgba(255, 76, 82, 0); border-color: #55556b; }
+    }
+  </style>
+</head>
+<body>
+  <section class="panel">
+    <h1>ESP32 Control Panel</h1>
+    <p>Tap a command to interact with your sensors. Keep this console nearby while monitoring data in the field.</p>
+
+    <pre class="ascii" id="espLogo">
+        .------------------------------------------------.
+        |   ___      ________      ________      ___     |
+        |  /###\____/######//=====/######/|_____/###\    |
+        |  \___/~~~~\______/~~~~~~\______/~~~~~~\___/    |
+        | |::::::::::::::::::::::::::::::::::::::::::::| |
+        | |░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░| |
+        | |::::::::::::::::::::::::::::::::::::::::::::| |
+        | | [] [] [] [] [] [] [] [] [] [] [] [] [] [] | |
+        | | [] [] [] [] [] [] [] [] [] [] [] [] [] [] | |
+        | |____________________________________________| |
+        | | [] [] [] [] [] [] [] [] [] [] [] [] [] [] | |
+        | | [] [] [] [] [] [] [] [] [] [] [] [] [] [] | |
+        | '--------------------------------------------' |
+        '------------------------------------------------'
+    </pre>
+
+    <div class="actions">
+      <button class="primary" id="loadBtn">Load Sensor Data</button>
+      <button class="danger" id="dropBtn">Drop Data</button>
+    </div>
+  </section>
+  <script>
+    const logo = document.getElementById('espLogo');
+    const loadBtn = document.getElementById('loadBtn');
+    const dropBtn = document.getElementById('dropBtn');
+
+    const pulse = (className) => {
+      logo.classList.remove('pulse-green', 'pulse-red');
+      void logo.offsetWidth; // restart animation
+      logo.classList.add(className);
+    };
+
+    loadBtn.addEventListener('click', () => pulse('pulse-green'));
+    dropBtn.addEventListener('click', () => pulse('pulse-red'));
+  </script>
+</body>
+</html>
