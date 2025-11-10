@@ -18,6 +18,10 @@ use log::info;
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
+const STARTUP_DELAY_SEC: u64 = 3;
+const LIGHT_DURATION_MS: u64 = 6000;
+const STEP_MS: u64 = 100;
+
 #[main]
 fn main() -> ! {
     // generator version: 1.0.0
@@ -39,21 +43,25 @@ fn main() -> ! {
         Output::new(peripherals.GPIO12, Level::Low, OutputConfig::default()),
     ];
 
-    info!("Delaying start - 3 seconds!");
-    Delay::new().delay(Duration::from_secs(3));
+    let step = Duration::from_millis(STEP_MS);
+    let delay = Delay::new();
+
+    info!("Delaying start - {STARTUP_DELAY_SEC} seconds!");
+    delay.delay(Duration::from_secs(STARTUP_DELAY_SEC));
 
     // Avoid false positives
     let mut triggers = 0;
     loop {
         if sensor_pin.is_low() {
-            Delay::new().delay(Duration::from_millis(100));
+            triggers = 0;
+            delay.delay(step);
             continue;
         }
 
         if triggers < 3 {
             info!("Trigger {triggers}");
             triggers += 1;
-            Delay::new().delay(Duration::from_millis(100));
+            delay.delay(step);
             continue;
         }
 
@@ -63,17 +71,10 @@ fn main() -> ! {
             led.set_high();
         }
 
-        let mut hundreds_of_ms_remaining = 6000;
+        let mut hundreds_of_ms_remaining = LIGHT_DURATION_MS;
         loop {
-            Delay::new().delay(Duration::from_millis(100));
-
-            if sensor_pin.is_high() {
-                info!("Motion reset!");
-                hundreds_of_ms_remaining = 3000;
-                continue;
-            } else {
-                hundreds_of_ms_remaining -= 100;
-            }
+            delay.delay(step);
+            hundreds_of_ms_remaining -= STEP_MS;
 
             if hundreds_of_ms_remaining <= 0 {
                 info!("Clear");
@@ -82,8 +83,12 @@ fn main() -> ! {
                 }
                 break;
             }
+
+            if sensor_pin.is_high() {
+                info!("Motion reset!");
+                hundreds_of_ms_remaining = LIGHT_DURATION_MS;
+                continue;
+            }
         }
     }
-
-    // for inspiration have a look at the examples at https://github.com/esp-rs/esp-hal/tree/esp-hal-v1.0.0/examples/src/bin
 }
