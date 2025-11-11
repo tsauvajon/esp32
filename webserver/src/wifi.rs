@@ -1,4 +1,4 @@
-use core::{convert::identity, net::Ipv4Addr, str::FromStr};
+use core::{net::Ipv4Addr, str::FromStr};
 
 use embassy_executor::Spawner;
 use embassy_net::{Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
@@ -9,7 +9,7 @@ use esp_radio::wifi::{
     AccessPointConfig, AuthMethod, Interfaces, ModeConfig, WifiApState, WifiController, WifiDevice,
     WifiEvent,
 };
-use log::info;
+use log::{error, info};
 
 use crate::mk_static;
 
@@ -19,8 +19,8 @@ const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("WIFI_PASSWORD");
 
 // Access point
-const STATIC_IP: &str = "192.168.13.37/24";
-const GATEWAY_IP: &str = "192.168.13.37";
+const STATIC_IP: &str = "192.168.2.1/24";
+const GATEWAY_IP: &str = "192.168.2.1";
 
 pub async fn start_wifi(
     wifi_controller: WifiController<'static>,
@@ -61,6 +61,7 @@ async fn wait_for_connection(stack: Stack<'_>) {
         delay.delay_ms(500).await;
     }
 
+    info!("Waiting for config up - connect to access point and browse http://{STATIC_IP}");
     while !stack.is_config_up() {
         delay.delay_ms(100).await;
     }
@@ -88,21 +89,34 @@ async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
 #[embassy_executor::task]
 async fn connection_task(mut controller: WifiController<'static>) {
     info!(
-        "Starting connection task. Device capabilities: {:?}",
+        "Starting connection task as {:?}. Device capabilities: {:?}",
+        esp_radio::wifi::ap_mac(),
         controller.capabilities()
     );
 
     loop {
         match esp_radio::wifi::ap_state() {
             WifiApState::Started => {
+                info!("Wi-Fi is running as an Access Point");
+
                 // Until we're disconnected
                 controller.wait_for_event(WifiEvent::ApStop).await;
                 Delay {}.delay_ms(5_000).await
             }
-            WifiApState::Stopped | WifiApState::Invalid | _ => {}
+            WifiApState::Stopped | WifiApState::Invalid | _ => {
+                info!(
+                    "Wi-Fi Access Point status: {:?}",
+                    esp_radio::wifi::ap_state()
+                );
+            }
         }
 
-        if !controller.is_started().is_ok_and(identity) {
+        if !controller
+            .is_started()
+            .inspect_err(|err| error!("Controller is not started: {err}"))
+            .unwrap_or_default()
+        {
+            Delay {}.delay_ms(500).await;
             continue;
         }
 
