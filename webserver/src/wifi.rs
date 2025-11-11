@@ -5,10 +5,11 @@ use embassy_net::{Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
 use embassy_time::Delay;
 use embedded_hal_async::delay::DelayNs;
 use esp_hal::rng::Rng;
-use esp_radio::wifi::{
-    AccessPointConfig, AuthMethod, Interfaces, ModeConfig, WifiApState, WifiController, WifiDevice,
-    WifiEvent,
-};
+#[cfg(feature = "access-point")]
+use esp_radio::wifi::{AccessPointConfig, WifiApState};
+use esp_radio::wifi::{AuthMethod, Interfaces, ModeConfig, WifiController, WifiDevice, WifiEvent};
+#[cfg(feature = "station")]
+use esp_radio::wifi::{ClientConfig, WifiStaState};
 use log::{error, info};
 
 use crate::mk_static;
@@ -28,6 +29,10 @@ pub async fn start_wifi(
     rng: Rng,
     spawner: &Spawner,
 ) -> Stack<'static> {
+    // TODO: here and everywhere else, handle both station + AP being enabled at the same time
+    #[cfg(feature = "station")]
+    let wifi_interface = interfaces.sta;
+    #[cfg(feature = "access-point")]
     let wifi_interface = interfaces.ap;
     let net_seed = rng.random() as u64 | ((rng.random() as u64) << 32);
 
@@ -61,24 +66,29 @@ async fn wait_for_connection(stack: Stack<'_>) {
         delay.delay_ms(500).await;
     }
 
-    info!("Waiting for config up - connect to access point and browse http://{STATIC_IP}");
-    while !stack.is_config_up() {
-        delay.delay_ms(100).await;
+    #[cfg(feature = "station")]
+    {
+        info!("Waiting to get IP address");
+        loop {
+            if let Some(config) = stack.config_v4() {
+                info!("Got IP: {}", config.address);
+                break;
+            }
+            delay.delay_ms(100).await;
+        }
     }
 
-    stack
-        .config_v4()
-        .inspect(|config| info!("ipv4 config: {config:?}"));
+    #[cfg(feature = "access-point")]
+    {
+        info!("Waiting for a device to connect and browse http://{STATIC_IP}");
+        while !stack.is_config_up() {
+            delay.delay_ms(100).await;
+        }
 
-    // ### Station mode ###
-    // info!("Waiting to get IP address");
-    // loop {
-    //     if let Some(config) = stack.config_v4() {
-    //         info!("Got IP: {}", config.address);
-    //         break;
-    //     }
-    //     delay.delay_ms(100).await;
-    // }
+        stack
+            .config_v4()
+            .inspect(|config| info!("IPv4 config: {config:?}"));
+    }
 }
 
 #[embassy_executor::task]
@@ -87,13 +97,60 @@ async fn net_task(mut runner: Runner<'static, WifiDevice<'static>>) {
 }
 
 #[embassy_executor::task]
+#[cfg_attr(feature = "station", allow(unused_mut))]
 async fn connection_task(mut controller: WifiController<'static>) {
     info!(
-        "Starting connection task as {:?}. Device capabilities: {:?}",
-        esp_radio::wifi::ap_mac(),
+        "Starting connection. Device capabilities: {:?}",
         controller.capabilities()
     );
+    let mut delay = Delay {};
 
+    // TODO: join the two loops together, reusing common code
+    #[cfg(feature = "station")]
+    loop {
+        match esp_radio::wifi::sta_state() {
+            WifiStaState::Connected => {
+                // wait until we're no longer connected
+                controller.wait_for_event(WifiEvent::StaDisconnected).await;
+                delay.delay_ms(5_000).await
+            }
+
+            WifiStaState::Started
+            | WifiStaState::Disconnected
+            | WifiStaState::Stopped
+            | WifiStaState::Invalid
+            | _ => {
+                info!("Wi-Fi Station status: {:?}", esp_radio::wifi::ap_state());
+            }
+        }
+
+        if !controller.is_started().unwrap_or_default() {
+            let ssid = SSID.try_into().unwrap();
+            let pw = PASSWORD.try_into().unwrap();
+            let client_config = ClientConfig::default()
+                .with_auth_method(AuthMethod::Wpa2Personal)
+                .with_ssid(ssid)
+                .with_password(pw);
+            controller
+                .set_config(&ModeConfig::Client(client_config))
+                .unwrap();
+
+            info!("Starting Wi-Fi");
+            controller.start_async().await.unwrap();
+            info!("Wi-Fi started!");
+        }
+
+        info!("Connecting...");
+        match controller.connect_async().await {
+            Ok(_) => info!("Wi-Fi connected!"),
+            Err(err) => {
+                info!("Failed to connect to wifi: {err:?}");
+                delay.delay_ms(5_000).await;
+            }
+        }
+    }
+
+    #[cfg(feature = "access-point")]
     loop {
         match esp_radio::wifi::ap_state() {
             WifiApState::Started => {
@@ -101,7 +158,7 @@ async fn connection_task(mut controller: WifiController<'static>) {
 
                 // Until we're disconnected
                 controller.wait_for_event(WifiEvent::ApStop).await;
-                Delay {}.delay_ms(5_000).await
+                delay.delay_ms(5_000).await
             }
             WifiApState::Stopped | WifiApState::Invalid | _ => {
                 info!(
@@ -116,7 +173,7 @@ async fn connection_task(mut controller: WifiController<'static>) {
             .inspect_err(|err| error!("Controller is not started: {err}"))
             .unwrap_or_default()
         {
-            Delay {}.delay_ms(500).await;
+            delay.delay_ms(500).await;
             continue;
         }
 

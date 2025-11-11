@@ -76,3 +76,10 @@ incremental = false
 lto = 'fat'
 opt-level = 's'
 overflow-checks = false
+
+[features]
+default = ["access-point"]
+
+# Wi-Fi mode, either access-point or station
+access-point = []
+station = []
