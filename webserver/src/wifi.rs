@@ -1,7 +1,10 @@
+#[cfg(feature = "access-point")]
 use core::{net::Ipv4Addr, str::FromStr};
 
 use embassy_executor::Spawner;
-use embassy_net::{Ipv4Cidr, Runner, Stack, StackResources, StaticConfigV4};
+#[cfg(feature = "access-point")]
+use embassy_net::{Ipv4Cidr, StaticConfigV4};
+use embassy_net::{Runner, Stack, StackResources};
 use embassy_time::Delay;
 use embedded_hal_async::delay::DelayNs;
 use esp_hal::rng::Rng;
@@ -19,10 +22,6 @@ use crate::mk_static;
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("WIFI_PASSWORD");
 
-// Access point
-const STATIC_IP: &str = "192.168.2.1/24";
-const GATEWAY_IP: &str = "192.168.2.1";
-
 pub async fn start_wifi(
     wifi_controller: WifiController<'static>,
     interfaces: Interfaces<'static>,
@@ -36,13 +35,22 @@ pub async fn start_wifi(
     let wifi_interface = interfaces.ap;
     let net_seed = rng.random() as u64 | ((rng.random() as u64) << 32);
 
-    let address = Ipv4Cidr::from_str(STATIC_IP).unwrap();
-    let gateway = Some(Ipv4Addr::from_str(GATEWAY_IP).unwrap());
-    let net_config = embassy_net::Config::ipv4_static(StaticConfigV4 {
-        address,
-        gateway,
-        dns_servers: Default::default(),
-    });
+    #[cfg(feature = "station")]
+    let net_config = embassy_net::Config::dhcpv4(embassy_net::DhcpConfig::default());
+
+    #[cfg(feature = "access-point")]
+    let net_config = {
+        const STATIC_IP: &str = "192.168.2.1/24";
+        const GATEWAY_IP: &str = "192.168.2.1";
+
+        let address = Ipv4Cidr::from_str(STATIC_IP).unwrap();
+        let gateway = Some(Ipv4Addr::from_str(GATEWAY_IP).unwrap());
+        embassy_net::Config::ipv4_static(StaticConfigV4 {
+            address,
+            gateway,
+            dns_servers: Default::default(),
+        })
+    };
 
     let (stack, runner) = embassy_net::new(
         wifi_interface,
@@ -53,6 +61,8 @@ pub async fn start_wifi(
 
     spawner.spawn(connection_task(wifi_controller)).unwrap();
     spawner.spawn(net_task(runner)).unwrap();
+    #[cfg(feature = "access-point")]
+    spawner.spawn(dhcp_task(stack, gw_ip_addr_str)).unwrap();
 
     wait_for_connection(stack).await;
 
@@ -144,7 +154,7 @@ async fn connection_task(mut controller: WifiController<'static>) {
         match controller.connect_async().await {
             Ok(_) => info!("Wi-Fi connected!"),
             Err(err) => {
-                info!("Failed to connect to wifi: {err:?}");
+                error!("Connecting to Wi-Fi: {err:?}");
                 delay.delay_ms(5_000).await;
             }
         }
