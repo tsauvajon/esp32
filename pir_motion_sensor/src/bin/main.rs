@@ -19,13 +19,13 @@ use log::info;
 esp_bootloader_esp_idf::esp_app_desc!();
 
 const STARTUP_DELAY_SEC: u64 = 3;
-const LIGHT_DURATION_MS: u64 = 6000;
-const STEP_MS: u64 = 100;
+
+const LIGHT_DURATION_MS: u64 = 6_000; // How much time will the LEDs stay on after movement is detected
+const GRACE_PERIOD_MS: u64 = 3_000; // Don't extend the light duration if movement is re-detected in the grace period
+const STEP_MS: u64 = 100; // How frequently to check for movement
 
 #[main]
 fn main() -> ! {
-    // generator version: 1.0.0
-
     esp_println::logger::init_logger_from_env();
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -44,6 +44,7 @@ fn main() -> ! {
     ];
 
     let step = Duration::from_millis(STEP_MS);
+    let grace_period = Duration::from_millis(GRACE_PERIOD_MS);
     let delay = Delay::new();
 
     info!("Delaying start - {STARTUP_DELAY_SEC} seconds!");
@@ -71,12 +72,14 @@ fn main() -> ! {
             led.set_high();
         }
 
-        let mut hundreds_of_ms_remaining = LIGHT_DURATION_MS;
+        let mut ms_remaining = LIGHT_DURATION_MS;
+        delay.delay(grace_period);
+        ms_remaining -= GRACE_PERIOD_MS;
         loop {
             delay.delay(step);
-            hundreds_of_ms_remaining -= STEP_MS;
+            ms_remaining -= STEP_MS;
 
-            if hundreds_of_ms_remaining <= 0 {
+            if ms_remaining <= 0 {
                 info!("Clear");
                 for led in &mut leds {
                     led.set_low();
@@ -86,7 +89,7 @@ fn main() -> ! {
 
             if sensor_pin.is_high() {
                 info!("Motion reset!");
-                hundreds_of_ms_remaining = LIGHT_DURATION_MS;
+                ms_remaining = LIGHT_DURATION_MS;
                 continue;
             }
         }
