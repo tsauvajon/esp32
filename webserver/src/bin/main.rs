@@ -7,14 +7,17 @@
 )]
 
 use embassy_executor::Spawner;
-use embassy_time::{Duration, Timer};
+use embassy_time::Delay;
 use embedded_hal_async::delay::DelayNs;
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
 use esp_radio::wifi::Config as WifiConfig;
+use esp_radio::wifi::Interfaces;
+use esp_radio::wifi::WifiController;
 use log::info;
-use webserver::web::web_task;
+use webserver::mk_static;
+use webserver::web::WebApp;
 use webserver::wifi::start_wifi;
 
 extern crate alloc;
@@ -38,16 +41,18 @@ async fn main(spawner: Spawner) -> ! {
     let rng = esp_hal::rng::Rng::new();
     let radio_init = esp_radio::init().unwrap();
 
-    let (mut wifi_controller, interfaces) =
-        esp_radio::wifi::new(&radio_init, peripherals.WIFI, WifiConfig::default()).unwrap();
+    let (wifi_controller, interfaces) = &*mk_static!(
+        (WifiController<'static>, Interfaces<'static>),
+        esp_radio::wifi::new(&radio_init, peripherals.WIFI, WifiConfig::default()).unwrap()
+    );
 
-    let stack = start_wifi(wifi_controller, interfaces, rng, spawner).await;
+    let stack = start_wifi(wifi_controller, interfaces, rng, &spawner).await;
     let web_app = WebApp::default();
-    for id in 0..WEB_TASK_POOL_SIZE {
-        spawner.must_spawn(web_task(id, stack, web_app.router, web_app.config));
-    }
+    web_app.spawn_tasks(&spawner, stack);
+
+    info!("Spawned web server tasks");
 
     loop {
-        Delay {}.delay_ms(9999999999).await;
+        Delay {}.delay_ms(u32::MAX).await;
     }
 }

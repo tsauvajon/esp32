@@ -1,5 +1,6 @@
+use embassy_executor::Spawner;
 use embassy_net::Stack;
-use embassy_time::{Delay, Duration};
+use embassy_time::Duration;
 use picoserve::{
     AppBuilder, AppRouter, Config, Router, Server, Timeouts, make_static, response::File, routing,
 };
@@ -38,6 +39,14 @@ impl Default for WebApp {
         );
 
         Self { router, config }
+    }
+}
+
+impl WebApp {
+    pub fn spawn_tasks(&self, spawner: &Spawner, stack: Stack<'static>) {
+        for id in 0..WEB_TASK_POOL_SIZE {
+            spawner.must_spawn(web_task(id, stack, self.router, self.config));
+        }
     }
 }
 
