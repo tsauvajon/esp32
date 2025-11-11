@@ -1,6 +1,8 @@
 # Remember/forget the serial
 
-~/.config/espflash/espflash_ports.toml
+```sh
+vim ~/.config/espflash/espflash_ports.toml
+```
 
 # Can't connect
 
@@ -17,5 +19,12 @@ sudo setfacl -m u:USERNAME:rw /dev/ttyACM0
 # linker `xtensa-esp32-elf-gcc` not found
 
 ```sh
+cargo install espup --locked
+espup install
+
+# Run once
 . ~/export-esp.sh
+
+# Or put in Fish profile
+echo ". $HOME/export-esp.sh" >> $HOME/.fish_profile
 ```
