@@ -66,16 +66,24 @@ static_cell = "2.1.1"
 [profile.dev]
 # Rust debug is too slow.
 # For debug builds always builds with some optimization
-opt-level = "s"
+opt-level = 2
+
+[profile.dev.package.esp-radio]
+opt-level = 2
 
 [profile.release]
 codegen-units = 1        # LLVM can perform better optimizations using a single thread
 debug = 2
 debug-assertions = false
 incremental = false
-lto = 'fat'
-opt-level = 's'
+lto = "fat"
+opt-level = 3
 overflow-checks = false
+
+# https://docs.espressif.com/projects/rust/esp-radio/0.17.0/esp32/esp_radio/index.html#optimization-level
+# It is necessary to build with optimization level 2 or 3 since otherwise, it might not even be able to connect or advertise.
+[profile.release.package.esp-radio]
+opt-level = 3
 
 [features]
 default = ["access-point"]

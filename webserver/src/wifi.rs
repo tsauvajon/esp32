@@ -14,7 +14,7 @@ use log::{error, info};
 
 use crate::mk_static;
 
-// When in station mode: remote WiFi credentials
+// When in station mode: remote Wi-Fi credentials
 // When in access point mode: credentials for clients to use
 const SSID: &str = env!("SSID");
 const PASSWORD: &str = env!("WIFI_PASSWORD");
@@ -168,11 +168,12 @@ async fn connection_task(mut controller: WifiController<'static>) {
             }
         }
 
-        if !controller
+        if controller
             .is_started()
             .inspect_err(|err| error!("Controller is not started: {err}"))
             .unwrap_or_default()
         {
+            info!("Controller is already started, waiting for connections");
             delay.delay_ms(500).await;
             continue;
         }
@@ -186,8 +187,8 @@ async fn connection_task(mut controller: WifiController<'static>) {
         controller
             .set_config(&ModeConfig::AccessPoint(access_point_config))
             .unwrap();
-        info!("Starting WiFi Access Point");
+        info!("Starting Wi-Fi Access Point");
         controller.start_async().await.unwrap();
-        info!("WiFi started");
+        info!("Wi-Fi started");
     }
 }
