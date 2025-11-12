@@ -48,6 +48,7 @@ async fn main(spawner: Spawner) -> ! {
     info!("Spawned web server tasks");
 
     loop {
-        Delay {}.delay_ms(u32::MAX).await;
+        webserver::wifi::socket(stack).await;
+        // Delay {}.delay_ms(u32::MAX).await;
     }
 }

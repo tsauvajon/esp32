@@ -1,6 +1,7 @@
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::Duration;
+use log::info;
 use picoserve::{
     AppBuilder, AppRouter, Config, Router, Server, Timeouts, make_static, response::File, routing,
 };
@@ -57,13 +58,14 @@ pub async fn web_task(
     router: &'static AppRouter<Application>,
     config: &'static Config<Duration>,
 ) {
-    let port = 80;
+    let port = 8001;
     let mut tcp_rx_buffer = [0; 1024];
     let mut tcp_tx_buffer = [0; 1024];
     let mut http_buffer = [0; 2048];
 
     let server = Server::new(router, &config, &mut http_buffer);
 
+    info!("Starting server {id} on port {port}");
     server
         .listen_and_serve(id, stack, port, &mut tcp_rx_buffer, &mut tcp_tx_buffer)
         .await;
