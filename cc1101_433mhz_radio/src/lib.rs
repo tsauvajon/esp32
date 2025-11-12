@@ -59,13 +59,15 @@ fn setup_rx_tx<'a>(
         .unwrap();
     radio.set_chanbw(58_000).unwrap();
     radio.set_deviation(400_000).unwrap();
-    radio.set_sync_mode(SyncMode::Disabled).unwrap();
+    radio
+        .set_sync_mode(SyncMode::MatchPartialRepeated(54161))
+        .unwrap();
     radio.set_packet_length(PacketLength::Variable(61)).unwrap();
     radio
         .set_autocalibration(AutoCalibration::FromIdle)
         .unwrap();
     radio.set_address_filter(AddressFilter::Disabled).unwrap();
-    radio.crc_enable(false).unwrap();
+    radio.crc_enable(true).unwrap();
     radio.white_data_enable(false).unwrap();
 
     info!("Configured the radio rules");
