@@ -43,7 +43,11 @@
       color: #a1abc8;
     }
 
-    .ascii {
+    a {
+      text-decoration: none;
+    }
+
+    a .ascii {
       --logo-columns: 25;
       --logo-rows: 24;
       background: #0b0b12;
@@ -155,7 +159,8 @@
     <h1>ESP32 Control Panel</h1>
     <p>Get or purge all the collected sensor data.</p>
 
-    <pre class="ascii" id="espLogo">
+    <a href="/stats">
+      <pre class="ascii" id="espLogo">
 --------------------------------------------------------------------------------------------- 
 -%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%-
 -%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%-
@@ -231,7 +236,7 @@
       
             
     </pre>
-
+    </a>
     <div class="actions">
       <button class="primary" id="loadBtn">Load Sensor Data</button>
       <button class="danger" id="dropBtn">Drop Data</button>

@@ -3,7 +3,9 @@ use embassy_net::Stack;
 use embassy_time::Duration;
 use log::info;
 use picoserve::{
-    AppBuilder, AppRouter, Config, Router, Server, Timeouts, make_static, response::File, routing,
+    AppBuilder, AppRouter, Config, Router, Server, Timeouts, make_static,
+    response::{File, IntoResponse},
+    routing,
 };
 
 pub const WEB_TASK_POOL_SIZE: usize = 2;
@@ -14,10 +16,12 @@ impl AppBuilder for Application {
     type PathRouter = impl routing::PathRouter;
 
     fn build_app(self) -> Router<Self::PathRouter> {
-        Router::new().route(
-            "/",
-            routing::get_service(File::html(include_str!("index.html"))),
-        )
+        Router::new()
+            .route(
+                "/",
+                routing::get_service(File::html(include_str!("index.html"))),
+            )
+            .route("/stats", routing::get(heap_stats))
     }
 }
 
@@ -69,4 +73,8 @@ pub async fn web_task(
     server
         .listen_and_serve(id, stack, port, &mut tcp_rx_buffer, &mut tcp_tx_buffer)
         .await;
+}
+
+async fn heap_stats() -> impl IntoResponse {
+    alloc::format!("{}", esp_alloc::HEAP.stats())
 }
