@@ -1,14 +1,17 @@
+use alloc::{format, string::String};
 use embassy_executor::Spawner;
 use embassy_net::Stack;
 use embassy_time::Duration;
 use log::info;
 use picoserve::{
-    AppBuilder, AppRouter, Config, Router, Server, Timeouts, make_static,
-    response::{File, IntoResponse},
+    AppBuilder, AppRouter, Config, Router, Server, Timeouts, make_static, response::IntoResponse,
     routing,
 };
 
 pub const WEB_TASK_POOL_SIZE: usize = 2;
+const INDEX_HTML: &str = include_str!("index.html");
+const PRE_PLACEHOLDER: &str = "{{PRE_CONTENT}}";
+const ESP32_ASCII: &str = include_str!("esp32_logo.txt");
 
 pub struct Application;
 
@@ -17,11 +20,8 @@ impl AppBuilder for Application {
 
     fn build_app(self) -> Router<Self::PathRouter> {
         Router::new()
-            .route(
-                "/",
-                routing::get_service(File::html(include_str!("index.html"))),
-            )
-            .route("/stats", routing::get(heap_stats))
+            .route("/", routing::get(index_page))
+            .route("/stats", routing::get(stats_page))
     }
 }
 
@@ -75,6 +75,23 @@ pub async fn web_task(
         .await;
 }
 
-async fn heap_stats() -> impl IntoResponse {
-    alloc::format!("{}", esp_alloc::HEAP.stats())
+async fn index_page() -> impl IntoResponse {
+    html_response(render_with_pre(ESP32_ASCII))
+}
+
+async fn stats_page() -> impl IntoResponse {
+    let stats = heap_info();
+    html_response(render_with_pre(&stats))
+}
+
+fn heap_info() -> String {
+    format!("{}", esp_alloc::HEAP.stats()).replace("| Used", "|\nUsed")
+}
+
+fn render_with_pre(pre_content: &str) -> String {
+    INDEX_HTML.replace(PRE_PLACEHOLDER, pre_content)
+}
+
+fn html_response(body: String) -> impl IntoResponse {
+    (("Content-Type", "text/html; charset=utf-8"), body)
 }
