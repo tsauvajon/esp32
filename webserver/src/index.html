@@ -67,6 +67,10 @@
       transition: border-color 0.2s ease, box-shadow 0.2s ease;
     }
 
+    .pulse-green {
+      animation: glow-green 700ms ease;
+    }
+
     .pulse-blue {
       animation: glow-blue 700ms ease;
     }
@@ -192,11 +196,12 @@
     const dropBtn = document.getElementById('dropBtn');
 
     const pulse = (className) => {
-      logo.classList.remove('pulse-blue', 'pulse-red');
+      logo.classList.remove('pulse-green', 'pulse-blue', 'pulse-red');
       void logo.offsetWidth; // restart animation
       logo.classList.add(className);
     };
 
+    logo.classList.add('pulse-green');
     loadBtn.addEventListener('click', () => pulse('pulse-blue'));
     dropBtn.addEventListener('click', () => pulse('pulse-red'));
   </script>
