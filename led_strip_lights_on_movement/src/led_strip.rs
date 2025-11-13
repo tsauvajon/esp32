@@ -17,7 +17,7 @@ use log::info;
 
 use crate::single_colour::{SingleColour, SingleColourParams};
 
-layout1d!(pub Layout, 50);
+layout1d!(pub Layout, 300);
 
 pub type RmtControl<'p> = Control<
     { Layout::PIXEL_COUNT },
@@ -78,7 +78,7 @@ pub fn build_led_controller<'p>(
 
     let led_control = ControlBuilder::new_1d()
         .with_layout::<Layout, { Layout::PIXEL_COUNT }>()
-        .with_pattern::<SingleColour>(SingleColourParams::UltraSoftNightYellow)
+        .with_pattern::<SingleColour>(SingleColourParams::WarmWhite)
         .with_driver(ws2812_rmt_driver)
         .with_frame_buffer_size::<{ Ws2812::frame_buffer_size(Layout::PIXEL_COUNT) }>()
         .build();

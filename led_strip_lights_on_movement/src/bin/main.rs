@@ -46,7 +46,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
     let step = Duration::from_millis(STEP_MS);
     let grace_period = Duration::from_millis(GRACE_PERIOD_MS);
     let delay = Delay::new();
-    led_control.set_brightness(0.0);
+    led_control.set_brightness(0.05);
     let elapsed_in_ms = blinksy_esp::time::elapsed().as_millis();
     led_control.tick(elapsed_in_ms).unwrap();
 
@@ -71,7 +71,7 @@ async fn main(_spawner: embassy_executor::Spawner) -> ! {
 
         triggers = 0;
         info!("Initial motion!");
-        led_control.set_brightness(0.001);
+        led_control.set_brightness(0.05);
         let elapsed_in_ms = blinksy_esp::time::elapsed().as_millis();
         led_control.tick(elapsed_in_ms).unwrap();
 

@@ -1,4 +1,4 @@
-use blinksy::{color::Srgb, layout::Layout1d, markers::Dim1d, pattern::Pattern};
+use blinksy::{color::Hsv, layout::Layout1d, markers::Dim1d, pattern::Pattern};
 
 #[derive(Debug)]
 pub struct SingleColour {
@@ -10,7 +10,7 @@ where
     Layout: Layout1d,
 {
     type Params = SingleColourParams;
-    type Color = Srgb;
+    type Color = Hsv;
 
     /// Creates a new SingleColourParams pattern with the specified parameters.
     fn new(colour: SingleColourParams) -> Self {
@@ -37,46 +37,20 @@ pub enum SingleColourParams {
     Green,
     UltraSoftNightYellow,
     UltraSoftNightOrange,
+    WarmWhite,
 }
 
-impl From<&SingleColourParams> for Srgb {
+impl From<&SingleColourParams> for Hsv {
     fn from(colour: &SingleColourParams) -> Self {
         match colour {
-            SingleColourParams::Amber => Srgb {
-                red: 255.0,
-                green: 179.0,
-                blue: 104.0,
-            },
-            SingleColourParams::SoftAmber => Srgb {
-                red: 255.0,
-                green: 156.0,
-                blue: 78.0,
-            },
-            SingleColourParams::CandleWarm => Srgb {
-                red: 255.0,
-                green: 138.0,
-                blue: 51.0,
-            },
-            SingleColourParams::Pumpkin => Srgb {
-                red: 204.0,
-                green: 102.0,
-                blue: 51.0,
-            },
-            SingleColourParams::Green => Srgb {
-                red: 0.0,
-                green: 255.0,
-                blue: 0.0,
-            },
-            SingleColourParams::UltraSoftNightYellow => Srgb {
-                red: 90.0,
-                green: 20.0,
-                blue: 0.0,
-            },
-            SingleColourParams::UltraSoftNightOrange => Srgb {
-                red: 20.0,
-                green: 4.0,
-                blue: 4.0,
-            },
+            SingleColourParams::Amber => Hsv::new(0.0828, 0.5922, 1.0),
+            SingleColourParams::SoftAmber => Hsv::new(0.0734, 0.6941, 1.0),
+            SingleColourParams::CandleWarm => Hsv::new(0.0711, 0.8, 1.0),
+            SingleColourParams::Pumpkin => Hsv::new(0.0556, 0.75, 0.8),
+            SingleColourParams::Green => Hsv::new(0.3333, 1.0, 1.0),
+            SingleColourParams::UltraSoftNightYellow => Hsv::new(0.037, 1.0, 0.3529),
+            SingleColourParams::UltraSoftNightOrange => Hsv::new(0.0, 0.8, 0.0784),
+            SingleColourParams::WarmWhite => Hsv::new(0.10, 0.16, 0.12),
         }
     }
 }
