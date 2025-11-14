@@ -10,6 +10,7 @@ use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::delay::Delay;
 use esp_hal::gpio::{Input, InputConfig, Pull};
+use esp_hal::main;
 use esp_hal::time::Duration;
 use log::info;
 use pir_motion_sensor::led_strip::build_led_controller;
@@ -24,24 +25,22 @@ const LIGHT_DURATION_MS: u64 = 6_000; // How much time will the LEDs stay on aft
 const GRACE_PERIOD_MS: u64 = 3_000; // Don't extend the light duration if movement is re-detected in the grace period
 const STEP_MS: u64 = 100; // How frequently to check for movement
 
-#[esp_rtos::main]
-async fn main(_spawner: embassy_executor::Spawner) -> ! {
+#[main]
+fn main() -> ! {
     esp_println::logger::init_logger_from_env();
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
+    let movement_detection_pin = peripherals.GPIO33;
+    let led_strip_data_pin = peripherals.GPIO16;
+
     let sensor_pin = Input::new(
-        peripherals.GPIO33,
+        movement_detection_pin,
         InputConfig::default().with_pull(Pull::Down),
     );
 
-    let mut led_control = build_led_controller(peripherals.RMT, peripherals.GPIO0);
-    // let led_control = &mut *mk_static!(
-    //     RmtControl,
-    //     build_led_controller(peripherals.RMT, peripherals.GPIO0)
-    // );
-    // spawner.spawn(led_tick_task(led_control)).unwrap();
+    let mut led_control = build_led_controller(peripherals.RMT, led_strip_data_pin);
 
     let step = Duration::from_millis(STEP_MS);
     let grace_period = Duration::from_millis(GRACE_PERIOD_MS);

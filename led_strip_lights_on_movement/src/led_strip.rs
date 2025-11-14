@@ -48,12 +48,6 @@ pub fn _example_run(peripherals: Peripherals) -> ! {
     }
 }
 
-#[embassy_executor::task]
-pub async fn _led_tick_task(led_control: &'static mut RmtControl<'static>) {
-    let elapsed_in_ms = elapsed().as_millis();
-    led_control.tick(elapsed_in_ms).unwrap();
-}
-
 pub fn build_led_controller<'p>(
     rmt: peripherals::RMT<'p>,
     data_pin: impl PeripheralOutput<'p>,
