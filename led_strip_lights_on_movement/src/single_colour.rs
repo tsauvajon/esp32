@@ -1,3 +1,5 @@
+//! Module single_colour lights all LEDs in a strip with a single, unified colour.
+
 use blinksy::{color::Hsv, layout::Layout1d, markers::Dim1d, pattern::Pattern};
 
 #[derive(Debug)]
@@ -12,15 +14,15 @@ where
     type Params = SingleColourParams;
     type Color = Hsv;
 
-    /// Creates a new SingleColourParams pattern with the specified parameters.
+    /// Chooses the colour to display
     fn new(colour: SingleColourParams) -> Self {
         Self { colour }
     }
 
-    /// Generates colors for a 1D layout.
+    /// Generates colours for a 1D layout.
     ///
-    /// The SingleColourParams pattern creates a smooth transition of hues across the layout,
-    /// which shifts over time to create a flowing effect.
+    /// This is a static, single colour, so tick is only useful the first time it's called.
+    /// And it will always have the same output
     fn tick(&self, _time_in_ms: u64) -> impl Iterator<Item = Self::Color> {
         let Self { colour } = self;
 

@@ -57,7 +57,6 @@ pub fn build_led_controller<'p>(
         let rmt = Rmt::new(rmt, rmt_clock_frequency).unwrap();
         let rmt_channel = rmt.channel2;
 
-        // Create the driver using the ClocklessRmt builder."]
         blinksy::driver::ClocklessDriver::default()
             .with_led::<Ws2812>()
             .with_writer(
