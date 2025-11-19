@@ -79,48 +79,39 @@ struct Driver<'a> {
     delay: Delay,
 }
 
-#[derive(Debug)]
-enum DriverError {
-    #[allow(dead_code)] // False positive: this is displayed by panics
-    Led(ClocklessRmtError),
-    Timing,
-}
-
 impl<'a> Driver<'a> {
-    fn light_on(&mut self) -> Result<(), DriverError> {
+    fn light_on(&mut self) -> Result<(), ClocklessRmtError> {
         self.led_control.set_brightness(0.05);
         let elapsed_in_ms = blinksy_esp::time::elapsed().as_millis();
-        self.led_control
-            .tick(elapsed_in_ms)
-            .map_err(DriverError::Led)
+        self.led_control.tick(elapsed_in_ms)
     }
 
     fn light_off(&mut self) {
         self.led_control.set_brightness(0.0);
     }
 
-    fn keep_on_until_silence(&mut self, sensor_pin: &Input) -> Result<(), DriverError> {
+    fn keep_on_until_silence(&mut self, sensor_pin: &Input) -> Result<(), ClocklessRmtError> {
         self.light_on()?;
 
         self.delay.delay(GRACE_PERIOD);
         let mut time_remaining = LIGHT_DURATION
             .checked_sub(GRACE_PERIOD)
-            .ok_or(DriverError::Timing)?;
+            // Grace period > light duration - grace period is already expired
+            .unwrap_or(Duration::ZERO);
         loop {
-            self.delay.delay(STEP);
-            time_remaining = time_remaining
-                .checked_sub(STEP)
-                .ok_or(DriverError::Timing)?;
+            if sensor_pin.is_high() {
+                info!("Motion reset!");
+                time_remaining = LIGHT_DURATION;
+            }
+
             if time_remaining.le(&Duration::ZERO) {
                 info!("Clear");
                 self.light_off();
                 return Ok(());
             }
 
-            if sensor_pin.is_high() {
-                info!("Motion reset!");
-                time_remaining = LIGHT_DURATION;
-            }
+            self.delay.delay(STEP);
+            time_remaining = time_remaining.checked_sub(STEP).unwrap_or(Duration::ZERO);
         }
     }
 }
