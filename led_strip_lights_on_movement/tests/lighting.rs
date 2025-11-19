@@ -2,45 +2,84 @@
 #![no_main]
 
 use blinksy_esp::ClocklessRmtError;
+use core::fmt::Debug;
 use esp_hal::main;
 use esp_hal::time::Duration;
 use heapless::Vec;
-use log::info;
 use pir_motion_sensor::lighting::{Driver, LightControl, LightingProfile, Sleeper};
 use pir_motion_sensor::motion_detection::MotionDetector;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
+const TESTS: &[TestCase] = &[
+    TestCase {
+        name: "lighting::turns_off_after_duration_without_motion",
+        test: turns_off_after_duration_without_motion,
+    },
+    TestCase {
+        name: "lighting::resets_countdown_when_motion_detected_during_window",
+        test: resets_countdown_when_motion_detected_during_window,
+    },
+    TestCase {
+        name: "lighting::immediately_turns_off_when_grace_exceeds_light_duration",
+        test: immediately_turns_off_when_grace_exceeds_light_duration,
+    },
+];
+
+const MAX_TESTS: usize = 8;
+type FailureLog = Vec<Failure, MAX_TESTS>;
+
 #[main]
 fn main() -> ! {
     esp_println::logger::init_logger_from_env();
-    info!("Starting lighting tests");
     run_tests();
 }
 
 fn run_tests() -> ! {
-    const TESTS: &[TestCase] = &[
-        TestCase {
-            name: "turns_off_after_duration_without_motion",
-            test: turns_off_after_duration_without_motion,
-        },
-        TestCase {
-            name: "resets_countdown_when_motion_detected_during_window",
-            test: resets_countdown_when_motion_detected_during_window,
-        },
-        TestCase {
-            name: "immediately_turns_off_when_grace_exceeds_light_duration",
-            test: immediately_turns_off_when_grace_exceeds_light_duration,
-        },
-    ];
+    esp_println::println!("running {} tests", TESTS.len());
+
+    let mut passed = 0usize;
+    let mut failures: FailureLog = Vec::new();
 
     for case in TESTS {
-        info!("Running {}", case.name);
-        (case.test)();
-        info!("Passed {}", case.name);
+        esp_println::print!("test {} ... ", case.name);
+        match (case.test)() {
+            Ok(()) => {
+                passed += 1;
+                esp_println::println!("ok");
+            }
+            Err(err) => {
+                let _ = failures.push(Failure {
+                    name: case.name,
+                    message: err.message,
+                });
+                esp_println::println!("FAILED");
+            }
+        }
     }
 
-    info!("All lighting tests passed");
+    let failed = failures.len();
+    let ignored = TESTS.len().saturating_sub(passed + failed);
+    let status = if failed == 0 { "ok" } else { "FAILED" };
+
+    if failed > 0 {
+        esp_println::println!();
+        esp_println::println!("failures:");
+        for failure in failures.iter() {
+            esp_println::println!("---- {} ----", failure.name);
+            esp_println::println!("{}", failure.message);
+        }
+    }
+
+    esp_println::println!();
+    esp_println::println!(
+        "test result: {}. {} passed; {} failed; {} ignored; 0 measured; 0 filtered out",
+        status,
+        passed,
+        failed,
+        ignored
+    );
+
     loop {
         core::hint::spin_loop();
     }
@@ -48,10 +87,29 @@ fn run_tests() -> ! {
 
 struct TestCase {
     name: &'static str,
-    test: fn(),
+    test: fn() -> TestResult,
 }
 
-fn turns_off_after_duration_without_motion() {
+#[derive(Clone, Copy)]
+struct Failure {
+    name: &'static str,
+    message: &'static str,
+}
+
+type TestResult = Result<(), TestError>;
+
+#[derive(Clone, Copy)]
+struct TestError {
+    message: &'static str,
+}
+
+impl TestError {
+    const fn new(message: &'static str) -> Self {
+        Self { message }
+    }
+}
+
+fn turns_off_after_duration_without_motion() -> TestResult {
     let profile = LightingProfile::new(
         Duration::from_millis(500),
         Duration::from_millis(200),
@@ -66,22 +124,35 @@ fn turns_off_after_duration_without_motion() {
 
     driver
         .keep_on_until_silence_with_profile(&mut detector, profile)
-        .unwrap();
+        .map_err(|_| TestError::new("driver failed to keep lights on"))?;
 
     let (lights, sleeper) = driver.into_parts();
-    assert_eq!(lights.events.as_slice(), &[LightEvent::On, LightEvent::Off]);
-    assert_eq!(sleeper.delays.first(), Some(&profile.grace_period));
-    assert_eq!(
-        sleeper
-            .delays
-            .iter()
-            .filter(|&&duration| duration == profile.step)
-            .count(),
-        steps_needed
-    );
+    ensure_eq(
+        lights.events.as_slice(),
+        &[LightEvent::On, LightEvent::Off],
+        "lights should toggle on/off exactly once",
+    )?;
+    let first_delay = sleeper.delays.first();
+    ensure_eq(
+        &first_delay,
+        &Some(&profile.grace_period),
+        "driver must wait for grace period",
+    )?;
+    let step_delays = sleeper
+        .delays
+        .iter()
+        .filter(|&&duration| duration == profile.step)
+        .count();
+    ensure_eq(
+        &step_delays,
+        &steps_needed,
+        "driver should step countdown until timeout",
+    )?;
+
+    Ok(())
 }
 
-fn resets_countdown_when_motion_detected_during_window() {
+fn resets_countdown_when_motion_detected_during_window() -> TestResult {
     let profile = LightingProfile::new(
         Duration::from_millis(500),
         Duration::from_millis(200),
@@ -101,21 +172,30 @@ fn resets_countdown_when_motion_detected_during_window() {
 
     driver
         .keep_on_until_silence_with_profile(&mut detector, profile)
-        .unwrap();
+        .map_err(|_| TestError::new("driver failed to keep lights on"))?;
 
     let (lights, sleeper) = driver.into_parts();
-    assert_eq!(lights.events.as_slice(), &[LightEvent::On, LightEvent::Off]);
-    assert_eq!(
-        sleeper
-            .delays
-            .iter()
-            .filter(|&&duration| duration == profile.step)
-            .count(),
-        reset_steps as usize + 2
-    );
+    ensure_eq(
+        lights.events.as_slice(),
+        &[LightEvent::On, LightEvent::Off],
+        "lights should toggle on/off exactly once",
+    )?;
+    let step_delays = sleeper
+        .delays
+        .iter()
+        .filter(|&&duration| duration == profile.step)
+        .count();
+    let expected = reset_steps as usize + 2;
+    ensure_eq(
+        &step_delays,
+        &expected,
+        "driver should restart countdown after motion",
+    )?;
+
+    Ok(())
 }
 
-fn immediately_turns_off_when_grace_exceeds_light_duration() {
+fn immediately_turns_off_when_grace_exceeds_light_duration() -> TestResult {
     let profile = LightingProfile::new(
         Duration::from_millis(100),
         Duration::from_millis(200),
@@ -129,11 +209,35 @@ fn immediately_turns_off_when_grace_exceeds_light_duration() {
 
     driver
         .keep_on_until_silence_with_profile(&mut detector, profile)
-        .unwrap();
+        .map_err(|_| TestError::new("driver failed to keep lights on"))?;
 
     let (lights, sleeper) = driver.into_parts();
-    assert_eq!(lights.events.as_slice(), &[LightEvent::On, LightEvent::Off]);
-    assert_eq!(sleeper.delays.as_slice(), &[profile.grace_period]);
+    ensure_eq(
+        lights.events.as_slice(),
+        &[LightEvent::On, LightEvent::Off],
+        "lights should toggle on/off exactly once",
+    )?;
+    ensure_eq(
+        sleeper.delays.as_slice(),
+        &[profile.grace_period],
+        "driver should exit immediately when grace exceeds duration",
+    )?;
+
+    Ok(())
+}
+
+/// Libtest-style assertions must not panic or the runner cannot print a summary,
+/// so this helper logs mismatches and returns a `TestResult` instead of using `assert_eq!`.
+fn ensure_eq<T>(left: &T, right: &T, message: &'static str) -> TestResult
+where
+    T: PartialEq + Debug + ?Sized,
+{
+    if left != right {
+        log::error!("{}: left={:?}, right={:?}", message, left, right);
+        Err(TestError::new(message))
+    } else {
+        Ok(())
+    }
 }
 
 #[derive(Default, Debug)]
@@ -210,6 +314,7 @@ fn steps_for_duration(duration: Duration, step: Duration) -> u32 {
         .unwrap_or(0) as u32
 }
 
+/// No std::vec, so this replaces it
 fn repeat_value(value: bool, count: usize) -> Script {
     let mut script = Script::new();
     for _ in 0..count {
