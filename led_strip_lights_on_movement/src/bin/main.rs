@@ -20,11 +20,10 @@ use pir_motion_sensor::led_strip::{RmtControl, build_led_controller};
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
-const STARTUP_DELAY_SEC: u64 = 3;
-
-const LIGHT_DURATION_MS: u64 = 6_000; // How much time will the LEDs stay on after movement is detected
-const GRACE_PERIOD_MS: u64 = 3_000; // Don't extend the light duration if movement is re-detected in the grace period
-const STEP_MS: u64 = 100; // How frequently to check for movement
+const STARTUP_DELAY: Duration = Duration::from_secs(3); // HOw long to initially light up before trusting the PIR
+const LIGHT_DURATION: Duration = Duration::from_secs(6); // How much time will the LEDs stay on after movement is detected
+const GRACE_PERIOD: Duration = Duration::from_secs(3); // Don't extend the light duration if movement is re-detected in the grace period
+const STEP: Duration = Duration::from_millis(100); // How frequently to check for movement
 
 #[main]
 fn main() -> ! {
@@ -41,19 +40,17 @@ fn main() -> ! {
         InputConfig::default().with_pull(Pull::Down),
     );
 
-    const STEP: Duration = Duration::from_millis(STEP_MS);
-
     let delay = Delay::new();
     let led_control = build_led_controller(peripherals.RMT, led_strip_data_pin);
     let mut driver = Driver { led_control, delay };
     driver.light_on().unwrap();
 
-    info!("Delaying start - {STARTUP_DELAY_SEC} seconds!");
-    delay.delay(Duration::from_secs(STARTUP_DELAY_SEC));
+    info!("Delaying start - {STARTUP_DELAY}!");
+    delay.delay(STARTUP_DELAY);
 
     driver.light_off();
 
-    // Avoid false positives
+    // Avoid false positives by only turning it with 3 consecutive detections
     let mut triggers = 0;
     loop {
         if sensor_pin.is_low() {
@@ -63,9 +60,9 @@ fn main() -> ! {
             continue;
         }
 
+        triggers += 1;
+        info!("Trigger {triggers}");
         if triggers < 3 {
-            info!("Trigger {triggers}");
-            triggers += 1;
             delay.delay(STEP);
             continue;
         }
@@ -82,31 +79,39 @@ struct Driver<'a> {
     delay: Delay,
 }
 
-impl<'a> Driver<'a> {
-    const STEP: Duration = Duration::from_millis(STEP_MS);
-    const GRACE_PERIOD: Duration = Duration::from_millis(GRACE_PERIOD_MS);
+#[derive(Debug)]
+enum DriverError {
+    #[allow(dead_code)] // False positive: this is displayed by panics
+    Led(ClocklessRmtError),
+    Timing,
+}
 
-    fn light_on(&mut self) -> Result<(), ClocklessRmtError> {
+impl<'a> Driver<'a> {
+    fn light_on(&mut self) -> Result<(), DriverError> {
         self.led_control.set_brightness(0.05);
         let elapsed_in_ms = blinksy_esp::time::elapsed().as_millis();
-        self.led_control.tick(elapsed_in_ms)
+        self.led_control
+            .tick(elapsed_in_ms)
+            .map_err(DriverError::Led)
     }
 
     fn light_off(&mut self) {
         self.led_control.set_brightness(0.0);
     }
 
-    fn keep_on_until_silence(&mut self, sensor_pin: &Input) -> Result<(), ClocklessRmtError> {
+    fn keep_on_until_silence(&mut self, sensor_pin: &Input) -> Result<(), DriverError> {
         self.light_on()?;
 
-        let mut ms_remaining = LIGHT_DURATION_MS;
-        self.delay.delay(Self::GRACE_PERIOD);
-        ms_remaining -= GRACE_PERIOD_MS;
+        self.delay.delay(GRACE_PERIOD);
+        let mut time_remaining = LIGHT_DURATION
+            .checked_sub(GRACE_PERIOD)
+            .ok_or(DriverError::Timing)?;
         loop {
-            self.delay.delay(Self::STEP);
-            ms_remaining -= STEP_MS;
-
-            if ms_remaining <= 0 {
+            self.delay.delay(STEP);
+            time_remaining = time_remaining
+                .checked_sub(STEP)
+                .ok_or(DriverError::Timing)?;
+            if time_remaining.le(&Duration::ZERO) {
                 info!("Clear");
                 self.light_off();
                 return Ok(());
@@ -114,7 +119,7 @@ impl<'a> Driver<'a> {
 
             if sensor_pin.is_high() {
                 info!("Motion reset!");
-                ms_remaining = LIGHT_DURATION_MS;
+                time_remaining = LIGHT_DURATION;
             }
         }
     }
