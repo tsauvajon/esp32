@@ -24,9 +24,25 @@ const TESTS: &[TestCase] = &[
         name: "lighting::immediately_turns_off_when_grace_exceeds_light_duration",
         test: immediately_turns_off_when_grace_exceeds_light_duration,
     },
+    TestCase {
+        name: "lighting::maintains_on_state_while_motion_continues",
+        test: maintains_on_state_while_motion_continues,
+    },
+    TestCase {
+        name: "lighting::handles_non_divisible_step_sizes",
+        test: handles_non_divisible_step_sizes,
+    },
+    TestCase {
+        name: "lighting::propagates_light_on_errors",
+        test: propagates_light_on_errors,
+    },
+    TestCase {
+        name: "lighting::propagates_light_off_errors",
+        test: propagates_light_off_errors,
+    },
 ];
 
-const MAX_TESTS: usize = 8;
+const MAX_TESTS: usize = 12;
 type FailureLog = Vec<Failure, MAX_TESTS>;
 
 #[main]
@@ -226,6 +242,133 @@ fn immediately_turns_off_when_grace_exceeds_light_duration() -> TestResult {
     Ok(())
 }
 
+fn maintains_on_state_while_motion_continues() -> TestResult {
+    let profile = LightingProfile::new(
+        Duration::from_millis(800),
+        Duration::from_millis(200),
+        Duration::from_millis(100),
+    );
+    let lights = MockLights::default();
+    let sleeper = MockSleeper::default();
+    let mut driver = Driver::new(lights, sleeper);
+    let mut script = Script::new();
+    let motion_burst = 6usize;
+    push_repeated(&mut script, true, motion_burst);
+    let cooldown_steps = steps_to_clear(profile).saturating_add(2);
+    push_repeated(&mut script, false, cooldown_steps);
+    let mut detector = MockMotionDetector::with_script(script);
+
+    driver
+        .keep_on_until_silence_with_profile(&mut detector, profile)
+        .map_err(|_| TestError::new("driver failed to keep lights on"))?;
+
+    let (lights, sleeper) = driver.into_parts();
+    ensure_eq(
+        lights.events.as_slice(),
+        &[LightEvent::On, LightEvent::Off],
+        "lights should toggle on/off exactly once",
+    )?;
+    let grace_delays = sleeper
+        .delays
+        .iter()
+        .filter(|&&duration| duration == profile.grace_period)
+        .count();
+    ensure_eq(
+        &grace_delays,
+        &1usize,
+        "grace period should run exactly once",
+    )?;
+    let step_delays = sleeper
+        .delays
+        .iter()
+        .filter(|&&duration| duration == profile.step)
+        .count();
+    let remaining_after_motion = profile
+        .light_duration
+        .checked_sub(profile.step)
+        .unwrap_or(Duration::ZERO)
+        .as_micros();
+    let step = profile.step.as_micros();
+    let cooldown_expected = if step == 0 {
+        0
+    } else {
+        ((remaining_after_motion + step - 1) / step) as usize
+    };
+    ensure_eq(
+        &step_delays,
+        &(motion_burst + cooldown_expected),
+        "step delays should cover motion and cooldown",
+    )?;
+
+    Ok(())
+}
+
+fn handles_non_divisible_step_sizes() -> TestResult {
+    let profile = LightingProfile::new(
+        Duration::from_millis(750),
+        Duration::from_millis(100),
+        Duration::from_millis(200),
+    );
+    let lights = MockLights::default();
+    let sleeper = MockSleeper::default();
+    let mut driver = Driver::new(lights, sleeper);
+    let script = repeat_value(false, steps_to_clear(profile).saturating_add(2));
+    let mut detector = MockMotionDetector::with_script(script);
+
+    driver
+        .keep_on_until_silence_with_profile(&mut detector, profile)
+        .map_err(|_| TestError::new("driver failed to keep lights on"))?;
+
+    let (lights, sleeper) = driver.into_parts();
+    ensure_eq(
+        lights.events.as_slice(),
+        &[LightEvent::On, LightEvent::Off],
+        "lights should toggle on/off exactly once",
+    )?;
+    let step_delays = sleeper
+        .delays
+        .iter()
+        .filter(|&&duration| duration == profile.step)
+        .count();
+    let expected = steps_to_clear(profile);
+    ensure_eq(
+        &step_delays,
+        &expected,
+        "countdown should ceil-divide the remaining duration",
+    )?;
+
+    Ok(())
+}
+
+fn propagates_light_on_errors() -> TestResult {
+    let lights = FlakyLights::fail_on_on();
+    let sleeper = MockSleeper::default();
+    let mut driver = Driver::new(lights, sleeper);
+    let script = repeat_value(false, 1);
+    let mut detector = MockMotionDetector::with_script(script);
+
+    match driver.keep_on_until_silence_with_profile(&mut detector, LightingProfile::default()) {
+        Ok(_) => Err(TestError::new("driver should surface light_on errors")),
+        Err(_) => Ok(()),
+    }
+}
+
+fn propagates_light_off_errors() -> TestResult {
+    let lights = FlakyLights::fail_on_off();
+    let sleeper = MockSleeper::default();
+    let mut driver = Driver::new(lights, sleeper);
+    let script = repeat_value(
+        false,
+        steps_to_clear(LightingProfile::default()).saturating_add(2),
+    );
+    let mut detector = MockMotionDetector::with_script(script);
+
+    match driver.keep_on_until_silence_with_profile(&mut detector, LightingProfile::default()) {
+        Ok(_) => Err(TestError::new("driver should surface light_off errors")),
+        Err(_) => Ok(()),
+    }
+}
+
 /// Libtest-style assertions must not panic or the runner cannot print a summary,
 /// so this helper logs mismatches and returns a `TestResult` instead of using `assert_eq!`.
 fn ensure_eq<T>(left: &T, right: &T, message: &'static str) -> TestResult
@@ -268,6 +411,56 @@ impl Sleeper for MockSleeper {
     }
 }
 
+#[derive(Debug, Default)]
+struct FlakyLights {
+    mode: FailureMode,
+    events: EventLog,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+enum FailureMode {
+    #[default]
+    None,
+    FailOnOn,
+    FailOnOff,
+}
+
+impl FlakyLights {
+    fn fail_on_on() -> Self {
+        Self {
+            mode: FailureMode::FailOnOn,
+            ..Default::default()
+        }
+    }
+
+    fn fail_on_off() -> Self {
+        Self {
+            mode: FailureMode::FailOnOff,
+            ..Default::default()
+        }
+    }
+}
+
+impl LightControl for FlakyLights {
+    fn light_on(&mut self) -> Result<(), ClocklessRmtError> {
+        if matches!(self.mode, FailureMode::FailOnOn) {
+            Err(ClocklessRmtError::BufferSizeExceeded)
+        } else {
+            self.events.push(LightEvent::On).unwrap();
+            Ok(())
+        }
+    }
+
+    fn light_off(&mut self) -> Result<(), ClocklessRmtError> {
+        if matches!(self.mode, FailureMode::FailOnOff) {
+            Err(ClocklessRmtError::BufferSizeExceeded)
+        } else {
+            self.events.push(LightEvent::Off).unwrap();
+            Ok(())
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum LightEvent {
     On,
@@ -298,13 +491,16 @@ type DelayLog = Vec<Duration, 32>;
 type Script = Vec<bool, 64>;
 
 fn steps_to_clear(profile: LightingProfile) -> usize {
-    profile
+    let remaining = profile
         .light_duration
         .checked_sub(profile.grace_period)
         .unwrap_or(Duration::ZERO)
-        .as_micros()
-        .checked_div(profile.step.as_micros())
-        .unwrap_or(0) as usize
+        .as_micros();
+    let step = profile.step.as_micros();
+    if step == 0 {
+        return 0;
+    }
+    ((remaining + step - 1) / step) as usize
 }
 
 fn steps_for_duration(duration: Duration, step: Duration) -> u32 {
@@ -314,11 +510,19 @@ fn steps_for_duration(duration: Duration, step: Duration) -> u32 {
         .unwrap_or(0) as u32
 }
 
-/// No std::vec, so this replaces it
+/// No std::vec, so this replaces the vec!["some value to repeat"; 55] syntax.
+///
+/// It also makes a vec!["a single value"] easy to do, with just a `count` of 1.
 fn repeat_value(value: bool, count: usize) -> Script {
     let mut script = Script::new();
     for _ in 0..count {
         script.push(value).unwrap();
     }
     script
+}
+
+fn push_repeated(script: &mut Script, value: bool, count: usize) {
+    for _ in 0..count {
+        script.push(value).unwrap();
+    }
 }
