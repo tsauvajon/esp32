@@ -16,14 +16,14 @@ use esp_hal::time::Duration;
 use log::info;
 use pir_motion_sensor::led_strip::{RmtControl, build_led_controller};
 
-// This creates a default app-descriptor required by the esp-idf bootloader.
-// For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
 
 const STARTUP_DELAY: Duration = Duration::from_secs(3); // HOw long to initially light up before trusting the PIR
 const LIGHT_DURATION: Duration = Duration::from_secs(6); // How much time will the LEDs stay on after movement is detected
 const GRACE_PERIOD: Duration = Duration::from_secs(3); // Don't extend the light duration if movement is re-detected in the grace period
 const STEP: Duration = Duration::from_millis(100); // How frequently to check for movement
+
+const REQUIRED_CONSECUTIVE_DETECTIONS: u8 = 3;
 
 #[main]
 fn main() -> ! {
@@ -50,27 +50,25 @@ fn main() -> ! {
 
     driver.light_off();
 
-    // Avoid false positives by only turning it with 3 consecutive detections
     let mut triggers = 0;
     loop {
-        if sensor_pin.is_low() {
+        if sensor_pin.is_high() {
+            triggers += 1;
+            // Avoid false positives, by requiring detection several times in a row
+            if triggers >= REQUIRED_CONSECUTIVE_DETECTIONS {
+                info!("Initial motion!");
+                driver.keep_on_until_silence(&sensor_pin).unwrap();
+                triggers = 0;
+                continue;
+            }
+
+            info!("Trigger {triggers}");
+        } else {
             driver.light_off();
             triggers = 0;
-            delay.delay(STEP);
-            continue;
         }
 
-        triggers += 1;
-        info!("Trigger {triggers}");
-        if triggers < 3 {
-            delay.delay(STEP);
-            continue;
-        }
-
-        triggers = 0;
-        info!("Initial motion!");
-
-        driver.keep_on_until_silence(&sensor_pin).unwrap();
+        delay.delay(STEP);
     }
 }
 
