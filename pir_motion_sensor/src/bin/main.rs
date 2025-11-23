@@ -32,7 +32,7 @@ fn main() -> ! {
     let peripherals = esp_hal::init(config);
 
     let sensor_pin = Input::new(
-        peripherals.GPIO33,
+        peripherals.GPIO26,
         InputConfig::default().with_pull(Pull::Down),
     );
 

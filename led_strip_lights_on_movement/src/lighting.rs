@@ -109,7 +109,7 @@ where
                 time_remaining = profile.light_duration;
             }
 
-            if time_remaining == Duration::ZERO {
+            if time_remaining.le(&Duration::ZERO) {
                 info!("Clear");
                 self.light_off()?;
                 return Ok(());
