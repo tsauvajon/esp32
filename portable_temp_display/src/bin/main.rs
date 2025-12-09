@@ -22,9 +22,11 @@ const SENSOR_CHANNEL_SIZE: usize = 4;
 static SENSOR_CHANNEL: Channel<CriticalSectionRawMutex, Reading, SENSOR_CHANNEL_SIZE> =
     Channel::new();
 
-// This creates a default app-descriptor required by the esp-idf bootloader.
-// For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
 esp_bootloader_esp_idf::esp_app_desc!();
+
+// https://esp32.implrust.com/i2c/esp32-i2c.html => 100 or 400 kHz
+// https://docs.espressif.com/projects/esp-idf/en/stable/esp32c3/api-reference/peripherals/i2c.html
+const I2C_FAST_MODE_KHZ: u32 = 400;
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
@@ -63,9 +65,6 @@ async fn main(spawner: Spawner) -> ! {
 
     info!("Embassy initialized!");
 
-    // https://esp32.implrust.com/i2c/esp32-i2c.html => 100 or 400 kHz
-    // https://docs.espressif.com/projects/esp-idf/en/stable/esp32c3/api-reference/peripherals/i2c.html
-    const I2C_FAST_MODE_KHZ: u32 = 400;
     let frequency = Rate::from_khz(I2C_FAST_MODE_KHZ);
     let i2c = I2c::new(i2c_driver, I2cConfig::default().with_frequency(frequency))
         .unwrap()
