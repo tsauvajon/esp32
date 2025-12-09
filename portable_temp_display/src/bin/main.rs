@@ -7,11 +7,18 @@
 )]
 
 use embassy_executor::Spawner;
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
 use log::info;
+use portable_temp_display::segment_display::SegmentDisplay;
 use portable_temp_display::temp_humidity;
+use sht31::Reading;
+
+const SENSOR_CHANNEL_SIZE: usize = 4;
+static SENSOR_CHANNEL: Channel<CriticalSectionRawMutex, Reading, SENSOR_CHANNEL_SIZE> =
+    Channel::new();
 
 // This creates a default app-descriptor required by the esp-idf bootloader.
 // For more information see: <https://docs.espressif.com/projects/esp-idf/en/stable/esp32/api-reference/system/app_image_format.html#application-description>
@@ -20,18 +27,60 @@ esp_bootloader_esp_idf::esp_app_desc!();
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
     esp_println::logger::init_logger_from_env();
-
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+
     let peripherals = esp_hal::init(config);
 
-    let timg0 = TimerGroup::new(peripherals.TIMG0);
-    let sw_interrupt =
-        esp_hal::interrupt::software::SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
-    esp_rtos::start(timg0.timer0, sw_interrupt.software_interrupt0);
+    // Embassy
+    let timg0 = peripherals.TIMG0;
+    let interrupt = peripherals.SW_INTERRUPT;
+
+    // SHT31 Temperature Humidity
+    let i2c_driver = peripherals.I2C0;
+    let scl = peripherals.GPIO9;
+    let sda = peripherals.GPIO8;
+
+    // 3461BS Segment Display
+    let digit1 = peripherals.GPIO7;
+    let seg_a = peripherals.GPIO5;
+    let seg_f = peripherals.GPIO6;
+    let digit2 = peripherals.GPIO10;
+    let digit3 = peripherals.GPIO20;
+    let seg_b = peripherals.GPIO21;
+
+    let digit4 = peripherals.GPIO2; // TODO: SOLDER!
+    let seg_c = peripherals.GPIO1;
+    let seg_g = peripherals.GPIO0;
+    // not soldered: decimal point
+    let seg_d = peripherals.GPIO3;
+    let seg_e = peripherals.GPIO4;
+
+    let timer_group = TimerGroup::new(timg0);
+    let sw_interrupt = esp_hal::interrupt::software::SoftwareInterruptControl::new(interrupt);
+    esp_rtos::start(timer_group.timer0, sw_interrupt.software_interrupt0);
 
     info!("Embassy initialized!");
 
-    let _ = spawner;
+    spawner
+        .spawn(temp_humidity::run(
+            i2c_driver,
+            scl,
+            sda,
+            SENSOR_CHANNEL.sender(),
+        ))
+        .unwrap();
 
-    temp_humidity::run(peripherals.I2C0, peripherals.GPIO9, peripherals.GPIO8).await;
+    let mut segment_display = SegmentDisplay::new(
+        digit1, digit2, digit3, digit4, seg_a, seg_b, seg_c, seg_d, seg_e, seg_f, seg_g,
+    );
+
+    let receiver = SENSOR_CHANNEL.receiver();
+
+    loop {
+        let reading = receiver.receive().await;
+        // E.g. 23°C and 41% humidity will be displayed as 2341
+        let number_to_display =
+            (reading.temperature as u16 * 100) + (reading.humidity as u16 % 100);
+        segment_display.display(number_to_display).unwrap();
+    }
 }

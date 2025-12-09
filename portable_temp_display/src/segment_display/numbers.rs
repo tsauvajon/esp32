@@ -1,6 +1,4 @@
-use crate::segment_display::digits::SegmentDisplay;
-
-impl<'p> SegmentDisplay<'p> {
+impl<'p> super::SegmentDisplay<'p> {
     pub(super) fn display_digit(&mut self, number: u8) {
         match number {
             1 => self.one(),
