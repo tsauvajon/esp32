@@ -88,16 +88,14 @@ async fn main(spawner: Spawner) -> ! {
 
 async fn run_display_loop<'p>(
     segment_display: &mut SegmentDisplay<'p>,
-    mut receiver: Receiver<'static, CriticalSectionRawMutex, Reading, SENSOR_CHANNEL_SIZE>,
+    receiver: Receiver<'static, CriticalSectionRawMutex, Reading, SENSOR_CHANNEL_SIZE>,
 ) -> ! {
     let mut number_to_display = format_reading(receiver.receive().await);
 
     loop {
+        // TODO: select
+        number_to_display = format_reading(receiver.receive().await);
         segment_display.display(number_to_display).await;
-
-        if let Ok(reading) = receiver.try_receive() {
-            number_to_display = format_reading(reading);
-        }
     }
 }
 
