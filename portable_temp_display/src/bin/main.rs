@@ -10,6 +10,8 @@ use embassy_executor::Spawner;
 use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
+use esp_hal::i2c::master::{Config as I2cConfig, I2c};
+use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use log::info;
 use portable_temp_display::segment_display::SegmentDisplay;
@@ -61,19 +63,22 @@ async fn main(spawner: Spawner) -> ! {
 
     info!("Embassy initialized!");
 
+    // https://esp32.implrust.com/i2c/esp32-i2c.html => 100 or 400 kHz
+    // https://docs.espressif.com/projects/esp-idf/en/stable/esp32c3/api-reference/peripherals/i2c.html
+    const I2C_FAST_MODE_KHZ: u32 = 400;
+    let frequency = Rate::from_khz(I2C_FAST_MODE_KHZ);
+    let i2c = I2c::new(i2c_driver, I2cConfig::default().with_frequency(frequency))
+        .unwrap()
+        .with_scl(scl)
+        .with_sda(sda)
+        .into_async();
     spawner
-        .spawn(temp_humidity::run(
-            i2c_driver,
-            scl,
-            sda,
-            SENSOR_CHANNEL.sender(),
-        ))
+        .spawn(temp_humidity::run(i2c, SENSOR_CHANNEL.dyn_sender()))
         .unwrap();
 
     let mut segment_display = SegmentDisplay::new(
         digit1, digit2, digit3, digit4, seg_a, seg_b, seg_c, seg_d, seg_e, seg_f, seg_g,
     );
-
     let receiver = SENSOR_CHANNEL.receiver();
 
     loop {
@@ -81,6 +86,6 @@ async fn main(spawner: Spawner) -> ! {
         // E.g. 23°C and 41% humidity will be displayed as 2341
         let number_to_display =
             (reading.temperature as u16 * 100) + (reading.humidity as u16 % 100);
-        segment_display.display(number_to_display).unwrap();
+        segment_display.display(number_to_display).await;
     }
 }
