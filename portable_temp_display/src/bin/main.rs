@@ -7,7 +7,10 @@
 )]
 
 use embassy_executor::Spawner;
-use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
+use embassy_sync::{
+    blocking_mutex::raw::CriticalSectionRawMutex,
+    channel::{Channel, Receiver},
+};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
@@ -80,11 +83,25 @@ async fn main(spawner: Spawner) -> ! {
     );
     let receiver = SENSOR_CHANNEL.receiver();
 
+    run_display_loop(&mut segment_display, receiver).await;
+}
+
+async fn run_display_loop<'p>(
+    segment_display: &mut SegmentDisplay<'p>,
+    mut receiver: Receiver<'static, CriticalSectionRawMutex, Reading, SENSOR_CHANNEL_SIZE>,
+) -> ! {
+    let mut number_to_display = format_reading(receiver.receive().await);
+
     loop {
-        let reading = receiver.receive().await;
-        // E.g. 23°C and 41% humidity will be displayed as 2341
-        let number_to_display =
-            (reading.temperature as u16 * 100) + (reading.humidity as u16 % 100);
         segment_display.display(number_to_display).await;
+
+        if let Ok(reading) = receiver.try_receive() {
+            number_to_display = format_reading(reading);
+        }
     }
+}
+
+// E.g. 23°C and 41% humidity will be displayed as 2341
+fn format_reading(reading: Reading) -> u16 {
+    (reading.temperature as u16 * 100) + (reading.humidity as u16 % 100)
 }
