@@ -29,7 +29,7 @@ fn main() -> ! {
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    let movement_detection_pin = peripherals.GPIO26;
+    let movement_detection_pin = peripherals.GPIO17;
     let led_strip_data_pin = peripherals.GPIO16;
 
     let sensor_pin = Input::new(

@@ -88,7 +88,13 @@ where
         &mut self,
         motion_sensor: &mut impl MotionDetector,
     ) -> Result<(), ClocklessRmtError> {
-        self.keep_on_until_silence_with_profile(motion_sensor, LightingProfile::default())
+        self.keep_on_until_silence_with_profile(
+            motion_sensor,
+            LightingProfile {
+                light_duration: Duration::from_secs(15),
+                ..LightingProfile::default()
+            },
+        )
     }
 
     pub fn keep_on_until_silence_with_profile(
