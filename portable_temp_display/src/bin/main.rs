@@ -7,6 +7,7 @@
 )]
 
 use embassy_executor::Spawner;
+use embassy_futures::select::{Either, select};
 use embassy_sync::{
     blocking_mutex::raw::CriticalSectionRawMutex,
     channel::{Channel, Receiver},
@@ -93,9 +94,15 @@ async fn run_display_loop<'p>(
     let mut number_to_display = format_reading(receiver.receive().await);
 
     loop {
-        // TODO: select
-        number_to_display = format_reading(receiver.receive().await);
-        segment_display.display(number_to_display).await;
+        match select(
+            receiver.receive(),
+            segment_display.display(number_to_display),
+        )
+        .await
+        {
+            Either::First(reading) => number_to_display = format_reading(reading),
+            Either::Second(()) => (),
+        }
     }
 }
 
