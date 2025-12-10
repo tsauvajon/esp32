@@ -48,19 +48,19 @@ async fn main(spawner: Spawner) -> ! {
     let sda = peripherals.GPIO8;
 
     // 3461BS Segment Display
+    let digit4 = peripherals.GPIO0;
+    let seg_g = peripherals.GPIO1;
+    let seg_c = peripherals.GPIO2;
+    // not soldered: decimal point
+    let seg_d = peripherals.GPIO3;
+    let seg_e = peripherals.GPIO4;
+
     let digit1 = peripherals.GPIO7;
     let seg_a = peripherals.GPIO5;
     let seg_f = peripherals.GPIO6;
     let digit2 = peripherals.GPIO10;
     let digit3 = peripherals.GPIO20;
     let seg_b = peripherals.GPIO21;
-
-    let digit4 = peripherals.GPIO2; // TODO: SOLDER!
-    let seg_c = peripherals.GPIO1;
-    let seg_g = peripherals.GPIO0;
-    // not soldered: decimal point
-    let seg_d = peripherals.GPIO3;
-    let seg_e = peripherals.GPIO4;
 
     let timer_group = TimerGroup::new(timg0);
     let sw_interrupt = esp_hal::interrupt::software::SoftwareInterruptControl::new(interrupt);
