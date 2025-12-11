@@ -36,7 +36,7 @@ impl<'p> super::SegmentDisplay<'p> {
 
         self.display_digit(number);
 
-        Delay {}.delay_ms(DELAY_MICROSECONDS).await;
+        Delay {}.delay_us(DELAY_MICROSECONDS).await;
     }
 }
 

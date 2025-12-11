@@ -25,6 +25,6 @@ pub async fn run(i2c: I2c<'static, Async>, sender: DynamicSender<'static, Readin
             Err(err) => error!("Reading: {err}"),
         }
 
-        delay.delay_ms(500).await;
+        delay.delay_ms(5_000).await;
     }
 }
