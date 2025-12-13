@@ -43,12 +43,13 @@ async fn wait_for_connection(stack: Stack<'_>) {
     while !stack.is_link_up() {
         delay.delay_ms(500).await;
     }
+    info!("Wi-Fi link is up");
 
     {
         info!("Waiting to get IP address");
         loop {
             if let Some(config) = stack.config_v4() {
-                info!("Got IP: {}", config.address);
+                info!("Network stack ready with IPv4 {}", config.address);
                 break;
             }
             delay.delay_ms(100).await;

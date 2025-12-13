@@ -109,7 +109,9 @@ impl ApplicationPublisher for MqttHandle {
     async fn publish(&self, message: ApplicationMessage) -> MessageResult<()> {
         let sender = self.action_sender.clone();
         let action = MqttAction::from(message);
+        let topic = action.topic;
         sender.send(action).await;
+        info!("queued MQTT publish to topic {topic}");
         Ok(())
     }
 }
@@ -131,7 +133,11 @@ async fn enqueue_status(
     provider: &dyn ApplicationStatusProvider,
 ) {
     match provider.build_status_message(stack) {
-        Ok(action) => sender.send(MqttAction::from(action)).await,
+        Ok(action) => {
+            let topic = action.topic;
+            sender.send(MqttAction::from(action)).await;
+            info!("queued status update for MQTT topic {topic}");
+        }
         Err(err) => warn!("failed to build status payload: {err:?}"),
     }
 }
@@ -211,8 +217,9 @@ async fn mqtt_event_task(
 ) -> ! {
     loop {
         match receiver.receive().await {
-            MqttEvent::Connected { .. } => info!("MQTT connected"),
+            MqttEvent::Connected { .. } => info!("MQTT connected to broker"),
             MqttEvent::ConnectionStable { .. } => {
+                info!("MQTT connection is stable; publishing initial status");
                 enqueue_status(&action_sender, stack, status_provider).await
             }
             MqttEvent::Disconnected { error, .. } => warn!("MQTT disconnected: {error:?}"),

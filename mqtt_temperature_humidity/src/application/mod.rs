@@ -4,7 +4,7 @@ use core::result::Result as CoreResult;
 use embassy_net::{Ipv4Address, Stack};
 use embassy_time::Instant;
 use esp_radio::wifi::{self, WifiStaState};
-use log::warn;
+use log::{info, warn};
 use mountain_mqtt::data::quality_of_service::QualityOfService;
 use serde::Serialize;
 use serde::Serializer;
@@ -69,7 +69,13 @@ where
 {
     let message = build_telemetry_message(reading)
         .inspect_err(|err| warn!("failed to serialize telemetry payload: {err:?}"))?;
-    publisher.publish(message).await
+    let topic = message.topic;
+    publisher.publish(message).await?;
+    info!(
+        "published telemetry reading on {topic}: {:.1}°C / {:.0}% RH",
+        reading.temperature, reading.humidity
+    );
+    Ok(())
 }
 
 #[derive(Serialize)]
