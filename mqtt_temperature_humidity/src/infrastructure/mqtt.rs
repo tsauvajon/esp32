@@ -96,11 +96,13 @@ pub fn start(stack: Stack<'static>, spawner: &Spawner) -> MqttHandle {
     MqttHandle { action_sender }
 }
 
-pub async fn publish_reading(handle: &MqttHandle, reading: &Reading) -> Result<(), fmt::Error> {
-    let action = build_telemetry_action(reading)
-        .inspect_err(|err| warn!("failed to serialize telemetry payload: {err:?}"))?;
-    handle.action_sender.send(action.into()).await;
-    Ok(())
+impl MqttHandle {
+    pub async fn publish_reading(&self, reading: &Reading) -> Result<(), fmt::Error> {
+        let action = build_telemetry_action(reading)
+            .inspect_err(|err| warn!("failed to serialize telemetry payload: {err:?}"))?;
+        self.action_sender.send(action.into()).await;
+        Ok(())
+    }
 }
 
 fn build_manager_settings(address: Ipv4Address, port: u16) -> Settings {
