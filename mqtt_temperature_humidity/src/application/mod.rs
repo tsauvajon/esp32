@@ -71,6 +71,7 @@ impl From<&Reading> for TelemetryPayload {
 #[derive(Serialize)]
 struct StatusPayload {
     online: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
     rssi_dbm: Option<i32>,
     #[serde(rename = "upstime_s")]
     uptime_seconds: u64,
@@ -78,6 +79,7 @@ struct StatusPayload {
     #[serde(rename = "mac")]
     mac_address: MacAddress,
     #[serde(rename = "ip")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     ip: Option<Ipv4Address>,
 }
 
