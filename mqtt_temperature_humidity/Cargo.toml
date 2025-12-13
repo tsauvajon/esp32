@@ -1,6 +1,6 @@
 [package]
 edition = "2024"
-name = "portable_temp_display"
+name = "mqtt_sht31"
 rust-version = "1.91.1"
 version = "0.1.0"
 

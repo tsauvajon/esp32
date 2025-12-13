@@ -2,7 +2,7 @@ use core::fmt::{self, Write};
 
 use embassy_executor::Spawner;
 use embassy_net::{Ipv4Address, Stack};
-use embassy_sync::blocking_mutex::raw::NoopRawMutex;
+use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::{Duration, Instant, Timer};
 use esp_radio::wifi::{self, WifiStaState};
@@ -22,21 +22,27 @@ const MQTT_TOPIC_TELEMETRY: &str = env!("MQTT_TOPIC_TELEMETRY");
 const MQTT_TOPIC_STATUS: &str = env!("MQTT_TOPIC_STATUS");
 const FIRMWARE: &str = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"));
 
+// option_env for mqtt auth
+
 const ACTION_QUEUE: usize = 8;
 const EVENT_QUEUE: usize = 8;
 const MQTT_BUFFER_SIZE: usize = 1024;
 const PAYLOAD_CAPACITY: usize = 256;
 const STATUS_INTERVAL_SECS: u64 = 60;
 
-static ACTION_CHANNEL: Channel<NoopRawMutex, MqttAction, ACTION_QUEUE> = Channel::new();
-static EVENT_CHANNEL: Channel<NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE> =
-    Channel::new();
+static ACTION_CHANNEL: Channel<CriticalSectionRawMutex, MqttAction, ACTION_QUEUE> = Channel::new();
+static EVENT_CHANNEL: Channel<
+    CriticalSectionRawMutex,
+    MqttEvent<NoopApplicationEvent>,
+    EVENT_QUEUE,
+> = Channel::new();
 
-type ActionSender = Sender<'static, NoopRawMutex, MqttAction, ACTION_QUEUE>;
-type EventSender = Sender<'static, NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
-type EventReceiver = Receiver<'static, NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
+type ActionSender = Sender<'static, CriticalSectionRawMutex, MqttAction, ACTION_QUEUE>;
+type EventSender =
+    Sender<'static, CriticalSectionRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
+type EventReceiver =
+    Receiver<'static, CriticalSectionRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
 
-/// Start the MQTT manager and helper tasks. Call this once the Wi-Fi stack is ready.
 pub fn start(stack: Stack<'static>, spawner: &Spawner) {
     let broker_ip = parse_broker_ip();
     let broker_port = parse_broker_port();
@@ -57,17 +63,17 @@ pub fn start(stack: Stack<'static>, spawner: &Spawner) {
             action_receiver,
         ))
         .ok()
-        .expect("failed to spawn mqtt manager");
+        .expect("spawn MQTT manager");
 
     spawner
         .spawn(mqtt_event_task(event_receiver, action_sender, stack))
         .ok()
-        .expect("failed to spawn mqtt event task");
+        .expect("spawn MQTT event task");
 
     spawner
         .spawn(status_publisher_task(stack, ACTION_CHANNEL.sender()))
         .ok()
-        .expect("failed to spawn mqtt status task");
+        .expect("spawn MQTT status task");
 }
 
 /// Queue a telemetry publish for the given reading.
@@ -251,9 +257,16 @@ async fn mqtt_manager_task(
     connection_settings: ConnectionSettings<'static>,
     settings: Settings,
     event_sender: EventSender,
-    action_receiver: Receiver<'static, NoopRawMutex, MqttAction, ACTION_QUEUE>,
+    action_receiver: Receiver<'static, CriticalSectionRawMutex, MqttAction, ACTION_QUEUE>,
 ) -> ! {
-    mqtt_manager::run::<MqttAction, NoopApplicationEvent, 0, MQTT_BUFFER_SIZE, ACTION_QUEUE>(
+    mqtt_manager::run::<
+        MqttAction,
+        NoopApplicationEvent,
+        CriticalSectionRawMutex,
+        0,
+        MQTT_BUFFER_SIZE,
+        ACTION_QUEUE,
+    >(
         stack,
         connection_settings,
         settings,

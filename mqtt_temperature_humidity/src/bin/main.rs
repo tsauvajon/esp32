@@ -17,10 +17,10 @@ use esp_println::println;
 use esp_radio::Controller;
 use esp_radio::wifi::Config as WifiConfig;
 use log::info;
-use portable_temp_display::mk_static;
-use portable_temp_display::mqtt;
-use portable_temp_display::temp_humidity;
-use portable_temp_display::wifi::start_wifi;
+use mqtt_sht31::mk_static;
+use mqtt_sht31::mqtt;
+use mqtt_sht31::temp_humidity;
+use mqtt_sht31::wifi::start_wifi;
 use sht31::Reading;
 
 const SENSOR_CHANNEL_SIZE: usize = 4;
@@ -67,7 +67,7 @@ async fn main(spawner: Spawner) -> ! {
         .unwrap();
     let receiver = SENSOR_CHANNEL.receiver();
 
-    // ######### WiFi
+    // ######### WiFi/MQTT
     let rng = esp_hal::rng::Rng::new();
     let radio_init = &*mk_static!(Controller, esp_radio::init().unwrap());
     let (wifi_controller, interfaces) =
