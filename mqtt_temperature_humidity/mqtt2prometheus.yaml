@@ -1,0 +1,83 @@
+mqtt:
+  subscriptions:
+    - topic: home/+/+/+/state
+
+metrics:
+  # Telemetry payload
+  - name: temperature_celsius
+    help: "Sensor temperature (°C)"
+    topic: home/+/+/tele/state
+    type: gauge
+    json: temperature_c
+    labels_from_topic: [location, device]
+
+  - name: humidity_percent
+    help: "Sensor relative humidity (%)"
+    topic: home/+/+/tele/state
+    type: gauge
+    json: humidity_pct
+    labels_from_topic: [location, device]
+
+  # Status payload
+  - name: device_online
+    help: "Status payload online flag (1 = link up)"
+    topic: home/+/+/status/state
+    type: gauge
+    json: online
+    labels_from_topic: [location, device]
+
+  - name: wifi_rssi_dbm
+    help: "Wi-Fi RSSI (dBm)"
+    topic: home/+/+/status/state
+    type: gauge
+    json: rssi_dbm
+    labels_from_topic: [location, device]
+
+  - name: uptime_seconds
+    help: "Device uptime in seconds"
+    topic: home/+/+/status/state
+    type: counter
+    json: uptime_s
+    labels_from_topic: [location, device]
+
+  - name: heap_used_bytes
+    help: "Heap usage (bytes)"
+    topic: home/+/+/status/state
+    type: gauge
+    json: heap_used_bytes
+    labels_from_topic: [location, device]
+
+  - name: heap_total_bytes
+    help: "Total heap size (bytes)"
+    topic: home/+/+/status/state
+    type: gauge
+    json: heap_total_bytes
+    labels_from_topic: [location, device]
+
+  - name: wifi_channel
+    help: "Associated Wi-Fi channel"
+    topic: home/+/+/status/state
+    type: gauge
+    json: channel
+    labels_from_topic: [location, device]
+
+  - name: last_sensor_ok_seconds_ago
+    help: "Seconds since last sensor reading"
+    topic: home/+/+/status/state
+    type: gauge
+    json: last_sensor_ok_seconds_ago
+    labels_from_topic: [location, device]
+
+  - name: device_status_info
+    help: "String fields from status payload exposed as labels (value always 1)"
+    topic: home/+/+/status/state
+    type: gauge
+    json: 1
+    labels_from_topic: [location, device]
+    labels:
+      firmware: firmware
+      mac: mac
+      ip_address: ip
+      gateway_ip: gateway_ip
+      connected_bssid: bssid
+      reset_reason: reset_reason
