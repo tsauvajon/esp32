@@ -57,6 +57,13 @@ mountain-mqtt = { path = "../mountain-mqtt/mountain-mqtt/", default-features = f
 mountain-mqtt-embassy = { path = "../mountain-mqtt/mountain-mqtt-embassy/", default-features = false, features = [
   "log",
 ] }
+serde = { version = "1.0", default-features = false, features = [
+  "alloc",
+  "derive",
+] }
+serde-json-core = { version = "0.6", default-features = false, features = [
+  "heapless",
+] }
 smoltcp = { version = "0.12.0", default-features = false, features = [
   "log",
   # "medium-ethernet",

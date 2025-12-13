@@ -10,11 +10,12 @@ use log::{info, warn};
 use mountain_mqtt::client::{Client, ClientError, ConnectionSettings, EventHandlerError};
 use mountain_mqtt::data::quality_of_service::QualityOfService;
 use mountain_mqtt::mqtt_manager::{ConnectionId, MqttOperations};
-use mountain_mqtt::packets::publish::ApplicationMessage;
+use mountain_mqtt::packets::publish::ApplicationMessage as MqttApplicationMessage;
 use mountain_mqtt_embassy::mqtt_manager::{self, FromApplicationMessage, MqttEvent, Settings};
 
 use crate::application::{
-    ApplicationAction, ApplicationPublisher, PAYLOAD_CAPACITY, StatusProvider,
+    Message as ApplicationMessage, PAYLOAD_CAPACITY, Publisher as ApplicationPublisher,
+    StatusProvider as ApplicationStatusProvider,
 };
 
 const MQTT_BROKER_IP: &str = env!("MQTT_BROKER_IP");
@@ -47,7 +48,7 @@ impl MqttHandle {
     pub fn start(
         stack: Stack<'static>,
         spawner: &Spawner,
-        status_provider: &'static dyn StatusProvider,
+        status_provider: &'static dyn ApplicationStatusProvider,
     ) -> Self {
         let broker_ip = MQTT_BROKER_IP
             .parse()
@@ -107,9 +108,9 @@ impl MqttHandle {
 }
 
 impl ApplicationPublisher for MqttHandle {
-    async fn publish(&self, action: ApplicationAction) -> Result<(), fmt::Error> {
+    async fn publish(&self, message: ApplicationMessage) -> Result<(), fmt::Error> {
         let sender = self.action_sender.clone();
-        let action = MqttAction::from(action);
+        let action = MqttAction::from(message);
         sender.send(action).await;
         Ok(())
     }
@@ -129,9 +130,9 @@ fn build_manager_settings(address: Ipv4Address, port: u16) -> Settings {
 async fn enqueue_status(
     sender: &ActionSender,
     stack: Stack<'static>,
-    provider: &dyn StatusProvider,
+    provider: &dyn ApplicationStatusProvider,
 ) {
-    match provider.build_status_action(stack) {
+    match provider.build_status_message(stack) {
         Ok(action) => sender.send(MqttAction::from(action)).await,
         Err(err) => warn!("failed to build status payload: {err:?}"),
     }
@@ -145,8 +146,8 @@ pub struct MqttAction {
     retain: bool,
 }
 
-impl From<ApplicationAction> for MqttAction {
-    fn from(value: ApplicationAction) -> Self {
+impl From<ApplicationMessage> for MqttAction {
+    fn from(value: ApplicationMessage) -> Self {
         MqttAction {
             topic: value.topic,
             payload: value.payload,
@@ -179,7 +180,7 @@ struct NoopApplicationEvent;
 
 impl<const P: usize> FromApplicationMessage<P> for NoopApplicationEvent {
     fn from_application_message(
-        _message: &ApplicationMessage<P>,
+        _message: &MqttApplicationMessage<P>,
     ) -> Result<Self, EventHandlerError> {
         Ok(NoopApplicationEvent)
     }
@@ -208,7 +209,7 @@ async fn mqtt_event_task(
     receiver: EventReceiver,
     action_sender: ActionSender,
     stack: Stack<'static>,
-    status_provider: &'static dyn StatusProvider,
+    status_provider: &'static dyn ApplicationStatusProvider,
 ) -> ! {
     loop {
         match receiver.receive().await {
@@ -231,7 +232,7 @@ async fn mqtt_event_task(
 async fn status_publisher_task(
     stack: Stack<'static>,
     action_sender: ActionSender,
-    status_provider: &'static dyn StatusProvider,
+    status_provider: &'static dyn ApplicationStatusProvider,
 ) -> ! {
     loop {
         enqueue_status(&action_sender, stack, status_provider).await;
