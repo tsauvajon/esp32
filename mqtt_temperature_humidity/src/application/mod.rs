@@ -21,6 +21,12 @@ pub const PAYLOAD_CAPACITY: usize = 1024;
 const MQTT_TOPIC_TELEMETRY: &str = env!("MQTT_TOPIC_TELEMETRY");
 const MQTT_TOPIC_STATUS: &str = env!("MQTT_TOPIC_STATUS");
 const FIRMWARE: &str = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"));
+#[cfg(target_arch = "riscv32")]
+const DEVICE_VARIANT: &str = "esp32c3";
+#[cfg(target_arch = "xtensa")]
+const DEVICE_VARIANT: &str = "esp32";
+#[cfg(not(any(target_arch = "riscv32", target_arch = "xtensa")))]
+const DEVICE_VARIANT: &str = "unknown";
 static LAST_SENSOR_READING_SECS: AtomicU32 = AtomicU32::new(0);
 
 pub struct Message {
@@ -129,6 +135,23 @@ struct StatusPayload {
     reset_reason: Option<ResetReason>,
     #[serde(skip_serializing_if = "Option::is_none")]
     last_sensor_ok_seconds_ago: Option<u64>,
+    #[serde(rename = "device_info")]
+    device_info: DeviceMetadata,
+}
+
+#[derive(Serialize, Clone, Copy)]
+struct DeviceMetadata {
+    firmware: &'static str,
+    #[serde(rename = "chip")]
+    chip_variant: &'static str,
+    #[serde(rename = "mac")]
+    mac_address: MacAddress,
+    #[serde(rename = "ip")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    ip_address: Option<Ipv4Address>,
+    #[serde(rename = "bssid")]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    connected_bssid: Option<MacAddress>,
 }
 
 pub fn build_telemetry_message(reading: &Reading) -> MessageResult<Message> {
@@ -151,22 +174,32 @@ fn build_status_message(stack: Stack<'static>) -> MessageResult<Message> {
         Some(cfg) => (Some(cfg.address.address()), cfg.gateway),
         None => (None, None),
     };
+    let mac_address = MacAddress(wifi::sta_mac());
+    let connected_bssid = connected_ap
+        .as_ref()
+        .map(|details| MacAddress::from(details.bssid));
+    let device_info = DeviceMetadata {
+        firmware: FIRMWARE,
+        chip_variant: DEVICE_VARIANT,
+        mac_address,
+        ip_address,
+        connected_bssid,
+    };
     let status = StatusPayload {
         online: stack.is_link_up(),
         rssi_dbm: read_rssi_dbm(),
         uptime_seconds: now_secs,
-        firmware: FIRMWARE,
-        mac_address: MacAddress(wifi::sta_mac()),
-        ip_address,
+        firmware: device_info.firmware,
+        mac_address: device_info.mac_address,
+        ip_address: device_info.ip_address,
         gateway_ip,
         heap_total_bytes,
         heap_used_bytes,
-        connected_bssid: connected_ap
-            .as_ref()
-            .map(|details| MacAddress::from(details.bssid)),
+        connected_bssid: device_info.connected_bssid,
         channel: connected_ap.as_ref().map(|details| details.channel),
         reset_reason: system::reset_reason().map(ResetReason),
         last_sensor_ok_seconds_ago,
+        device_info,
     };
 
     let payload = to_string::<_, PAYLOAD_CAPACITY>(&status)?;
@@ -258,6 +291,7 @@ impl Serialize for ResetReason {
     }
 }
 
+#[derive(Clone, Copy)]
 struct MacAddress([u8; 6]);
 
 impl fmt::Display for MacAddress {
