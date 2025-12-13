@@ -12,11 +12,9 @@ use mountain_mqtt::data::quality_of_service::QualityOfService;
 use mountain_mqtt::mqtt_manager::{ConnectionId, MqttOperations};
 use mountain_mqtt::packets::publish::ApplicationMessage;
 use mountain_mqtt_embassy::mqtt_manager::{self, FromApplicationMessage, MqttEvent, Settings};
-use sht31::Reading;
 
 use crate::application::{
     ApplicationAction, PAYLOAD_CAPACITY, STATUS_INTERVAL_SECS, build_status_action,
-    build_telemetry_action,
 };
 
 const MQTT_BROKER_IP: &str = env!("MQTT_BROKER_IP");
@@ -44,63 +42,65 @@ pub struct MqttHandle {
     action_sender: ActionSender,
 }
 
-pub fn start(stack: Stack<'static>, spawner: &Spawner) -> MqttHandle {
-    let broker_ip = MQTT_BROKER_IP
-        .parse()
-        .unwrap_or_else(|_| panic!("invalid MQTT_BROKER_IP: {MQTT_BROKER_IP}"));
-    let broker_port = MQTT_BROKER_PORT
-        .parse()
-        .unwrap_or_else(|_| panic!("invalid MQTT_BROKER_PORT: {MQTT_BROKER_PORT}"));
-    let connection_settings =
-        if let (Some(username), Some(password)) = (MQTT_USERNAME, MQTT_PASSWORD) {
-            ConnectionSettings::authenticated(MQTT_CLIENT_ID, username, password.as_bytes())
-        } else {
-            ConnectionSettings::unauthenticated(MQTT_CLIENT_ID)
-        };
-
-    let settings = build_manager_settings(broker_ip, broker_port);
-
-    let action_channel = ACTION_CHANNEL.init(ActionChannel::new());
-    let event_channel = EVENT_CHANNEL.init(EventChannelInner::new());
-
-    let event_sender = event_channel.sender();
-    let action_receiver = action_channel.receiver();
-    let action_sender = action_channel.sender();
-    let event_receiver = event_channel.receiver();
-
-    spawner
-        .spawn(mqtt_manager_task(
-            stack,
-            connection_settings,
-            settings,
-            event_sender,
-            action_receiver,
-        ))
-        .ok()
-        .expect("spawn MQTT manager");
-
-    spawner
-        .spawn(mqtt_event_task(
-            event_receiver,
-            action_sender.clone(),
-            stack,
-        ))
-        .ok()
-        .expect("spawn MQTT event task");
-
-    spawner
-        .spawn(status_publisher_task(stack, action_sender.clone()))
-        .ok()
-        .expect("spawn MQTT status task");
-
-    MqttHandle { action_sender }
-}
-
 impl MqttHandle {
-    pub async fn publish_reading(&self, reading: &Reading) -> Result<(), fmt::Error> {
-        let action = build_telemetry_action(reading)
-            .inspect_err(|err| warn!("failed to serialize telemetry payload: {err:?}"))?;
-        self.action_sender.send(action.into()).await;
+    pub fn start(stack: Stack<'static>, spawner: &Spawner) -> Self {
+        let broker_ip = MQTT_BROKER_IP
+            .parse()
+            .unwrap_or_else(|_| panic!("invalid MQTT_BROKER_IP: {MQTT_BROKER_IP}"));
+        let broker_port = MQTT_BROKER_PORT
+            .parse()
+            .unwrap_or_else(|_| panic!("invalid MQTT_BROKER_PORT: {MQTT_BROKER_PORT}"));
+        let connection_settings =
+            if let (Some(username), Some(password)) = (MQTT_USERNAME, MQTT_PASSWORD) {
+                ConnectionSettings::authenticated(MQTT_CLIENT_ID, username, password.as_bytes())
+            } else {
+                ConnectionSettings::unauthenticated(MQTT_CLIENT_ID)
+            };
+
+        let settings = build_manager_settings(broker_ip, broker_port);
+
+        let action_channel = ACTION_CHANNEL.init(ActionChannel::new());
+        let event_channel = EVENT_CHANNEL.init(EventChannelInner::new());
+
+        let event_sender = event_channel.sender();
+        let action_receiver = action_channel.receiver();
+        let action_sender = action_channel.sender();
+        let event_receiver = event_channel.receiver();
+
+        spawner
+            .spawn(mqtt_manager_task(
+                stack,
+                connection_settings,
+                settings,
+                event_sender,
+                action_receiver,
+            ))
+            .ok()
+            .expect("spawn MQTT manager");
+
+        spawner
+            .spawn(mqtt_event_task(
+                event_receiver,
+                action_sender.clone(),
+                stack,
+            ))
+            .ok()
+            .expect("spawn MQTT event task");
+
+        spawner
+            .spawn(status_publisher_task(stack, action_sender.clone()))
+            .ok()
+            .expect("spawn MQTT status task");
+
+        Self { action_sender }
+    }
+
+    pub async fn publish<M>(&self, message: M) -> Result<(), fmt::Error>
+    where
+        MqttAction: From<M>,
+    {
+        let action = MqttAction::from(message);
+        self.action_sender.send(action).await;
         Ok(())
     }
 }
@@ -124,7 +124,7 @@ async fn enqueue_status(sender: ActionSender, stack: Stack<'static>) {
 }
 
 #[derive(Clone)]
-struct MqttAction {
+pub struct MqttAction {
     topic: &'static str,
     payload: String<PAYLOAD_CAPACITY>,
     qos: QualityOfService,

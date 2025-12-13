@@ -4,8 +4,11 @@ use embassy_net::{Ipv4Address, Stack};
 use embassy_time::Instant;
 use esp_radio::wifi::{self, WifiStaState};
 use heapless::String;
+use log::warn;
 use mountain_mqtt::data::quality_of_service::QualityOfService;
 use sht31::Reading;
+
+use crate::infrastructure::mqtt::MqttHandle;
 
 pub(crate) const PAYLOAD_CAPACITY: usize = 256;
 pub(crate) const STATUS_INTERVAL_SECS: u64 = 60;
@@ -101,5 +104,13 @@ impl fmt::Display for IpAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let octets = &self.0.octets();
         write!(f, "{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
+    }
+}
+
+impl MqttHandle {
+    pub async fn publish_reading(&self, reading: &Reading) -> Result<(), fmt::Error> {
+        let action = build_telemetry_action(reading)
+            .inspect_err(|err| warn!("failed to serialize telemetry payload: {err:?}"))?;
+        self.publish(action).await
     }
 }
