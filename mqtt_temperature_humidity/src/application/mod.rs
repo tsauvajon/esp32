@@ -84,7 +84,9 @@ struct StatusPayload {
 }
 
 pub fn build_telemetry_message(reading: &Reading) -> Result<Message, fmt::Error> {
-    let payload = serialize_payload(&TelemetryPayload::from(reading))?;
+    let payload = TelemetryPayload::from(reading);
+
+    let payload = serialize_payload(&payload)?;
 
     Ok(Message {
         topic: MQTT_TOPIC_TELEMETRY,
