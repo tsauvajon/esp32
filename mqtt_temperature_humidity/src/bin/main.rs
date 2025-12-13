@@ -15,7 +15,7 @@ use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
 use esp_println::println;
 use esp_radio::Controller;
-use esp_radio::wifi::Config as WifiConfig;
+use esp_radio::wifi::{Config as WifiConfig, CountryInfo};
 use log::info;
 use mqtt_sht31::application::{StatusReporter, publish_reading};
 use mqtt_sht31::infrastructure::mqtt::MqttHandle;
@@ -78,8 +78,9 @@ async fn main(spawner: Spawner) -> ! {
     // ######### WiFi/MQTT
     let rng = esp_hal::rng::Rng::new();
     let radio_init = &*mk_static!(Controller, esp_radio::init().unwrap());
+    let wifi_config = WifiConfig::default().with_country_code(CountryInfo::from(*b"FR"));
     let (wifi_controller, interfaces) =
-        esp_radio::wifi::new(&radio_init, peripherals.WIFI, WifiConfig::default()).unwrap();
+        esp_radio::wifi::new(&radio_init, peripherals.WIFI, wifi_config).unwrap();
     static STATUS_REPORTER: StatusReporter = StatusReporter;
     let stack = start_wifi(wifi_controller, interfaces, rng, &spawner).await;
     let mqtt_handle = MqttHandle::start(stack, &spawner, &STATUS_REPORTER);

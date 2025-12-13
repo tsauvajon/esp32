@@ -5,7 +5,7 @@ rust-version = "1.91.1"
 version = "0.1.0"
 
 [[bin]]
-name = "portable-temp-display"
+name = "mqtt_sht31"
 path = "./src/bin/main.rs"
 
 [dependencies]

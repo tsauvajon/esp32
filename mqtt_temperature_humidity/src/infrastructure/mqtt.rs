@@ -198,7 +198,7 @@ async fn mqtt_manager_task(
     event_sender: EventSender,
     action_receiver: Receiver<'static, NoopRawMutex, MqttAction, ACTION_QUEUE>,
 ) -> ! {
-    mqtt_manager::run::<MqttAction, NoopApplicationEvent, 0, MQTT_BUFFER_SIZE, ACTION_QUEUE>(
+    mqtt_manager::run::<MqttAction, NoopApplicationEvent, 16, MQTT_BUFFER_SIZE, ACTION_QUEUE>(
         stack,
         connection_settings,
         settings,

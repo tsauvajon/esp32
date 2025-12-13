@@ -10,7 +10,7 @@ pub async fn run(i2c: I2c<'static, Async>, sender: DynamicSender<'static, Readin
     let delay = &mut Delay {};
     let mut sht = SHT31::new(i2c, Delay {}).with_unit(TemperatureUnit::Celsius);
 
-    info!("Hello world!");
+    info!("Running the SHT31 temp sensor loop");
     loop {
         match sht.read() {
             Ok(
