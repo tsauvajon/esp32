@@ -45,11 +45,22 @@ esp-rtos = { version = "0.2.0", features = [
   "esp32c3",
   "log-04",
 ] }
+esp-wifi-sys = { version = "0.8.1", default-features = false, features = [
+  "esp32c3",
+] }
 log = "0.4.27"
-sht31 = "0.3.2"
+heapless = "0.9.2"
+mountain-mqtt = { path = "../mountain-mqtt/mountain-mqtt/", default-features = false, features = [
+  "embedded-hal-async",
+  "embedded-io-async",
+] }
+mountain-mqtt-embassy = { path = "../mountain-mqtt/mountain-mqtt-embassy/", default-features = false, features = [
+  "log",
+] }
 smoltcp = { version = "0.12.0", default-features = false, features = [
   "log",
   # "medium-ethernet",
+  "medium-ip",
   "multicast",
   "proto-dhcpv4",
   "proto-dns",
@@ -60,6 +71,7 @@ smoltcp = { version = "0.12.0", default-features = false, features = [
   "socket-tcp",
   # "socket-udp",
 ] }
+sht31 = "0.3.2"
 static_cell = "2.1.1"
 
 [profile.dev]

@@ -18,6 +18,7 @@ use esp_radio::Controller;
 use esp_radio::wifi::Config as WifiConfig;
 use log::info;
 use portable_temp_display::mk_static;
+use portable_temp_display::mqtt;
 use portable_temp_display::temp_humidity;
 use portable_temp_display::wifi::start_wifi;
 use sht31::Reading;
@@ -72,9 +73,11 @@ async fn main(spawner: Spawner) -> ! {
     let (wifi_controller, interfaces) =
         esp_radio::wifi::new(&radio_init, peripherals.WIFI, WifiConfig::default()).unwrap();
     let stack = start_wifi(wifi_controller, interfaces, rng, &spawner).await;
+    mqtt::start(stack, &spawner);
 
     loop {
         let reading = receiver.receive().await;
         println!("{reading:?}");
+        mqtt::publish_reading(&reading).await;
     }
 }

@@ -1,0 +1,3 @@
+[submodule "mountain-mqtt"]
+	path = mountain-mqtt
+	url = git@github.com:tsauvajon/mountain-mqtt.git
