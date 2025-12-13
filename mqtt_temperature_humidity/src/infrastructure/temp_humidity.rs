@@ -21,7 +21,7 @@ pub async fn run(i2c: I2c<'static, Async>, sender: DynamicSender<'static, Readin
                     humidity,
                 },
             ) => {
-                info!("{temperature:.1}°C / {humidity:.0}% humidity");
+                info!("sensor measured: {temperature:.1}°C / {humidity:.0}% humidity");
                 sender.send(reading).await;
                 application::record_sensor_reading(Instant::now().as_secs());
             }
