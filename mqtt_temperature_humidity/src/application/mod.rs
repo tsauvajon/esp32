@@ -53,26 +53,36 @@ where
 
 #[derive(Serialize)]
 struct TelemetryPayload {
-    temperature_c: f32,
-    humidity_pct: f32,
+    #[serde(rename = "temperature_c")]
+    temperature_celsius: f32,
+    #[serde(rename = "humidity_pct")]
+    humidity_percent: f32,
+}
+
+impl From<&Reading> for TelemetryPayload {
+    fn from(reading: &Reading) -> Self {
+        Self {
+            temperature_celsius: reading.temperature,
+            humidity_percent: reading.humidity,
+        }
+    }
 }
 
 #[derive(Serialize)]
 struct StatusPayload {
     online: bool,
     rssi_dbm: Option<i32>,
-    uptime_s: u64,
+    #[serde(rename = "upstime_s")]
+    uptime_seconds: u64,
     firmware: &'static str,
-    mac: MacAddress,
+    #[serde(rename = "mac")]
+    mac_address: MacAddress,
+    #[serde(rename = "ip")]
     ip: Option<Ipv4Address>,
 }
 
 pub fn build_telemetry_message(reading: &Reading) -> Result<Message, fmt::Error> {
-    let telemetry = TelemetryPayload {
-        temperature_c: reading.temperature,
-        humidity_pct: reading.humidity,
-    };
-    let payload = serialize_payload(&telemetry)?;
+    let payload = serialize_payload(&TelemetryPayload::from(reading))?;
 
     Ok(Message {
         topic: MQTT_TOPIC_TELEMETRY,
@@ -86,9 +96,9 @@ fn build_status_message(stack: Stack<'static>) -> Result<Message, fmt::Error> {
     let status = StatusPayload {
         online: stack.is_link_up(),
         rssi_dbm: read_rssi_dbm(),
-        uptime_s: Instant::now().as_secs(),
+        uptime_seconds: Instant::now().as_secs(),
         firmware: FIRMWARE,
-        mac: MacAddress(wifi::sta_mac()),
+        mac_address: MacAddress(wifi::sta_mac()),
         ip: stack.config_v4().map(|cfg| cfg.address.address()),
     };
 
