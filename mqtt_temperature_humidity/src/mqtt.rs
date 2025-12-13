@@ -30,15 +30,22 @@ const MQTT_BUFFER_SIZE: usize = 1024;
 const PAYLOAD_CAPACITY: usize = 256;
 const STATUS_INTERVAL_SECS: u64 = 60;
 
-static ACTION_CHANNEL: Channel<NoopRawMutex, MqttAction, ACTION_QUEUE> = Channel::new();
-static EVENT_CHANNEL: Channel<NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE> =
-    Channel::new();
+type ActionChannel = Channel<NoopRawMutex, MqttAction, ACTION_QUEUE>;
+type EventChannelInner = Channel<NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
+
+static ACTION_CHANNEL: static_cell::StaticCell<ActionChannel> = static_cell::StaticCell::new();
+static EVENT_CHANNEL: static_cell::StaticCell<EventChannelInner> = static_cell::StaticCell::new();
 
 type ActionSender = Sender<'static, NoopRawMutex, MqttAction, ACTION_QUEUE>;
 type EventSender = Sender<'static, NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
 type EventReceiver = Receiver<'static, NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
 
-pub fn start(stack: Stack<'static>, spawner: &Spawner) {
+#[derive(Clone)]
+pub struct MqttHandle {
+    action_sender: ActionSender,
+}
+
+pub fn start(stack: Stack<'static>, spawner: &Spawner) -> MqttHandle {
     let broker_ip = MQTT_BROKER_IP
         .parse()
         .unwrap_or_else(|_| panic!("invalid MQTT_BROKER_IP: {MQTT_BROKER_IP}"));
@@ -54,10 +61,13 @@ pub fn start(stack: Stack<'static>, spawner: &Spawner) {
 
     let settings = build_manager_settings(broker_ip, broker_port);
 
-    let event_sender = EVENT_CHANNEL.sender();
-    let action_receiver = ACTION_CHANNEL.receiver();
-    let action_sender = ACTION_CHANNEL.sender();
-    let event_receiver = EVENT_CHANNEL.receiver();
+    let action_channel = ACTION_CHANNEL.init(ActionChannel::new());
+    let event_channel = EVENT_CHANNEL.init(EventChannelInner::new());
+
+    let event_sender = event_channel.sender();
+    let action_receiver = action_channel.receiver();
+    let action_sender = action_channel.sender();
+    let event_receiver = event_channel.receiver();
 
     spawner
         .spawn(mqtt_manager_task(
@@ -71,20 +81,26 @@ pub fn start(stack: Stack<'static>, spawner: &Spawner) {
         .expect("spawn MQTT manager");
 
     spawner
-        .spawn(mqtt_event_task(event_receiver, action_sender, stack))
+        .spawn(mqtt_event_task(
+            event_receiver,
+            action_sender.clone(),
+            stack,
+        ))
         .ok()
         .expect("spawn MQTT event task");
 
     spawner
-        .spawn(status_publisher_task(stack, ACTION_CHANNEL.sender()))
+        .spawn(status_publisher_task(stack, action_sender.clone()))
         .ok()
         .expect("spawn MQTT status task");
+
+    MqttHandle { action_sender }
 }
 
-pub async fn publish_reading(reading: &Reading) -> Result<(), fmt::Error> {
+pub async fn publish_reading(handle: &MqttHandle, reading: &Reading) -> Result<(), fmt::Error> {
     let action = build_telemetry_action(reading)
         .inspect_err(|err| warn!("failed to serialize telemetry payload: {err:?}"))?;
-    ACTION_CHANNEL.sender().send(action).await;
+    handle.action_sender.send(action).await;
     Ok(())
 }
 
@@ -250,13 +266,7 @@ async fn mqtt_manager_task(
     event_sender: EventSender,
     action_receiver: Receiver<'static, NoopRawMutex, MqttAction, ACTION_QUEUE>,
 ) -> ! {
-    mqtt_manager::run::<
-        MqttAction,
-        NoopApplicationEvent,
-        0,
-        MQTT_BUFFER_SIZE,
-        ACTION_QUEUE,
-    >(
+    mqtt_manager::run::<MqttAction, NoopApplicationEvent, 0, MQTT_BUFFER_SIZE, ACTION_QUEUE>(
         stack,
         connection_settings,
         settings,

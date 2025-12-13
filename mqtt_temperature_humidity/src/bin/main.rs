@@ -73,11 +73,11 @@ async fn main(spawner: Spawner) -> ! {
     let (wifi_controller, interfaces) =
         esp_radio::wifi::new(&radio_init, peripherals.WIFI, WifiConfig::default()).unwrap();
     let stack = start_wifi(wifi_controller, interfaces, rng, &spawner).await;
-    mqtt::start(stack, &spawner);
+    let mqtt_handle = mqtt::start(stack, &spawner);
 
     loop {
         let reading = receiver.receive().await;
         println!("{reading:?}");
-        let _ = mqtt::publish_reading(&reading).await;
+        let _ = mqtt::publish_reading(&mqtt_handle, &reading).await;
     }
 }
