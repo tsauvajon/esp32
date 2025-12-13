@@ -13,7 +13,6 @@ use esp_hal::clock::CpuClock;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
-use esp_println::println;
 use esp_radio::Controller;
 use esp_radio::wifi::{Config as WifiConfig, CountryInfo};
 use log::info;
@@ -87,7 +86,6 @@ async fn main(spawner: Spawner) -> ! {
 
     loop {
         let reading = receiver.receive().await;
-        println!("{reading:?}");
         let _ = publish_reading(&mqtt_handle, &reading).await;
     }
 }
