@@ -1,3 +1,6 @@
 [submodule "mountain-mqtt"]
 	path = mountain-mqtt
 	url = git@github.com:tsauvajon/mountain-mqtt.git
+[submodule "mqtt2prometheus/mqtt2prometheus"]
+	path = mqtt2prometheus/mqtt2prometheus
+	url = git@github.com:tsauvajon/mqtt2prometheus.git
