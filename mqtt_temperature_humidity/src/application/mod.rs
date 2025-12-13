@@ -1,4 +1,5 @@
 use core::fmt::{self, Write};
+use core::result::Result as CoreResult;
 
 use embassy_net::{Ipv4Address, Stack};
 use embassy_time::Instant;
@@ -7,8 +8,7 @@ use log::warn;
 use mountain_mqtt::data::quality_of_service::QualityOfService;
 use serde::Serialize;
 use serde::Serializer;
-use serde_json_core::heapless::String;
-use serde_json_core::to_string;
+use serde_json_core::{heapless::String, ser::Error as SerdeJsonError, to_string};
 use sht31::Reading;
 
 pub const PAYLOAD_CAPACITY: usize = 256;
@@ -24,25 +24,46 @@ pub struct Message {
     pub retain: bool,
 }
 
+pub type MessageResult<T> = CoreResult<T, MessageError>;
+
+#[derive(Debug)]
+pub enum MessageError {
+    Serialization(SerdeJsonError),
+}
+
+impl From<SerdeJsonError> for MessageError {
+    fn from(value: SerdeJsonError) -> Self {
+        Self::Serialization(value)
+    }
+}
+
+impl fmt::Display for MessageError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MessageError::Serialization(err) => write!(f, "serialization error: {err:?}"),
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct StatusReporter;
 
 #[allow(async_fn_in_trait)]
 pub trait Publisher {
-    async fn publish(&self, message: Message) -> Result<(), fmt::Error>;
+    async fn publish(&self, message: Message) -> MessageResult<()>;
 }
 
 pub trait StatusProvider: Send + Sync {
-    fn build_status_message(&self, stack: Stack<'static>) -> Result<Message, fmt::Error>;
+    fn build_status_message(&self, stack: Stack<'static>) -> MessageResult<Message>;
 }
 
 impl StatusProvider for StatusReporter {
-    fn build_status_message(&self, stack: Stack<'static>) -> Result<Message, fmt::Error> {
+    fn build_status_message(&self, stack: Stack<'static>) -> MessageResult<Message> {
         build_status_message(stack)
     }
 }
 
-pub async fn publish_reading<P>(publisher: &P, reading: &Reading) -> Result<(), fmt::Error>
+pub async fn publish_reading<P>(publisher: &P, reading: &Reading) -> MessageResult<()>
 where
     P: Publisher,
 {
@@ -83,9 +104,8 @@ struct StatusPayload {
     ip_address: Option<Ipv4Address>,
 }
 
-pub fn build_telemetry_message(reading: &Reading) -> Result<Message, fmt::Error> {
-    let payload = to_string::<_, PAYLOAD_CAPACITY>(&TelemetryPayload::from(reading))
-        .map_err(|_| fmt::Error)?;
+pub fn build_telemetry_message(reading: &Reading) -> MessageResult<Message> {
+    let payload = to_string::<_, PAYLOAD_CAPACITY>(&TelemetryPayload::from(reading))?;
 
     Ok(Message {
         topic: MQTT_TOPIC_TELEMETRY,
@@ -95,7 +115,7 @@ pub fn build_telemetry_message(reading: &Reading) -> Result<Message, fmt::Error>
     })
 }
 
-fn build_status_message(stack: Stack<'static>) -> Result<Message, fmt::Error> {
+fn build_status_message(stack: Stack<'static>) -> MessageResult<Message> {
     let status = StatusPayload {
         online: stack.is_link_up(),
         rssi_dbm: read_rssi_dbm(),
@@ -105,7 +125,7 @@ fn build_status_message(stack: Stack<'static>) -> Result<Message, fmt::Error> {
         ip_address: stack.config_v4().map(|cfg| cfg.address.address()),
     };
 
-    let payload = to_string::<_, PAYLOAD_CAPACITY>(&status).map_err(|_| fmt::Error)?;
+    let payload = to_string::<_, PAYLOAD_CAPACITY>(&status)?;
 
     Ok(Message {
         topic: MQTT_TOPIC_STATUS,

@@ -1,5 +1,3 @@
-use core::fmt;
-
 use embassy_executor::Spawner;
 use embassy_net::{Ipv4Address, Stack};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
@@ -14,7 +12,7 @@ use mountain_mqtt::packets::publish::ApplicationMessage as MqttApplicationMessag
 use mountain_mqtt_embassy::mqtt_manager::{self, FromApplicationMessage, MqttEvent, Settings};
 
 use crate::application::{
-    Message as ApplicationMessage, PAYLOAD_CAPACITY, Publisher as ApplicationPublisher,
+    Message as ApplicationMessage, MessageResult, PAYLOAD_CAPACITY, Publisher as ApplicationPublisher,
     StatusProvider as ApplicationStatusProvider,
 };
 
@@ -108,7 +106,7 @@ impl MqttHandle {
 }
 
 impl ApplicationPublisher for MqttHandle {
-    async fn publish(&self, message: ApplicationMessage) -> Result<(), fmt::Error> {
+    async fn publish(&self, message: ApplicationMessage) -> MessageResult<()> {
         let sender = self.action_sender.clone();
         let action = MqttAction::from(message);
         sender.send(action).await;
