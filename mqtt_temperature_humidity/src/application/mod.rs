@@ -16,7 +16,7 @@ use serde::Serializer;
 use serde_json_core::{heapless::String, ser::Error as SerdeJsonError, to_string};
 use sht31::Reading;
 
-pub const PAYLOAD_CAPACITY: usize = 256;
+pub const PAYLOAD_CAPACITY: usize = 1024;
 
 const MQTT_TOPIC_TELEMETRY: &str = env!("MQTT_TOPIC_TELEMETRY");
 const MQTT_TOPIC_STATUS: &str = env!("MQTT_TOPIC_STATUS");
