@@ -17,6 +17,7 @@ use esp_println::println;
 use esp_radio::Controller;
 use esp_radio::wifi::Config as WifiConfig;
 use log::info;
+use mqtt_sht31::application::{StatusReporter, publish_reading};
 use mqtt_sht31::infrastructure::mqtt::MqttHandle;
 use mqtt_sht31::infrastructure::temp_humidity;
 use mqtt_sht31::infrastructure::wifi::start_wifi;
@@ -72,12 +73,13 @@ async fn main(spawner: Spawner) -> ! {
     let radio_init = &*mk_static!(Controller, esp_radio::init().unwrap());
     let (wifi_controller, interfaces) =
         esp_radio::wifi::new(&radio_init, peripherals.WIFI, WifiConfig::default()).unwrap();
+    static STATUS_REPORTER: StatusReporter = StatusReporter;
     let stack = start_wifi(wifi_controller, interfaces, rng, &spawner).await;
-    let mqtt_handle = MqttHandle::start(stack, &spawner);
+    let mqtt_handle = MqttHandle::start(stack, &spawner, &STATUS_REPORTER);
 
     loop {
         let reading = receiver.receive().await;
         println!("{reading:?}");
-        let _ = mqtt_handle.publish_reading(&reading).await;
+        let _ = publish_reading(&mqtt_handle, &reading).await;
     }
 }

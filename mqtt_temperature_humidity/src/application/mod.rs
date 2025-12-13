@@ -8,23 +8,47 @@ use log::warn;
 use mountain_mqtt::data::quality_of_service::QualityOfService;
 use sht31::Reading;
 
-use crate::infrastructure::mqtt::MqttHandle;
-
-pub(crate) const PAYLOAD_CAPACITY: usize = 256;
-pub(crate) const STATUS_INTERVAL_SECS: u64 = 60;
+pub const PAYLOAD_CAPACITY: usize = 256;
 
 const MQTT_TOPIC_TELEMETRY: &str = env!("MQTT_TOPIC_TELEMETRY");
 const MQTT_TOPIC_STATUS: &str = env!("MQTT_TOPIC_STATUS");
 const FIRMWARE: &str = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"));
 
-pub(crate) struct ApplicationAction {
+pub struct ApplicationAction {
     pub topic: &'static str,
     pub payload: String<PAYLOAD_CAPACITY>,
     pub qos: QualityOfService,
     pub retain: bool,
 }
 
-pub(crate) fn build_telemetry_action(reading: &Reading) -> Result<ApplicationAction, fmt::Error> {
+#[derive(Clone, Copy)]
+pub struct StatusReporter;
+
+#[allow(async_fn_in_trait)]
+pub trait ApplicationPublisher {
+    async fn publish(&self, action: ApplicationAction) -> Result<(), fmt::Error>;
+}
+
+pub trait StatusProvider: Send + Sync {
+    fn build_status_action(&self, stack: Stack<'static>) -> Result<ApplicationAction, fmt::Error>;
+}
+
+impl StatusProvider for StatusReporter {
+    fn build_status_action(&self, stack: Stack<'static>) -> Result<ApplicationAction, fmt::Error> {
+        build_status_action(stack)
+    }
+}
+
+pub async fn publish_reading<P>(publisher: &P, reading: &Reading) -> Result<(), fmt::Error>
+where
+    P: ApplicationPublisher,
+{
+    let action = build_telemetry_action(reading)
+        .inspect_err(|err| warn!("failed to serialize telemetry payload: {err:?}"))?;
+    publisher.publish(action).await
+}
+
+pub fn build_telemetry_action(reading: &Reading) -> Result<ApplicationAction, fmt::Error> {
     let mut payload: String<PAYLOAD_CAPACITY> = String::new();
     write!(
         &mut payload,
@@ -40,7 +64,7 @@ pub(crate) fn build_telemetry_action(reading: &Reading) -> Result<ApplicationAct
     })
 }
 
-pub(crate) fn build_status_action(stack: Stack<'static>) -> Result<ApplicationAction, fmt::Error> {
+fn build_status_action(stack: Stack<'static>) -> Result<ApplicationAction, fmt::Error> {
     let mut payload: String<PAYLOAD_CAPACITY> = String::new();
     let online = stack.is_link_up();
     write!(&mut payload, "{{\"online\":{}", online)?;
@@ -104,13 +128,5 @@ impl fmt::Display for IpAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let octets = &self.0.octets();
         write!(f, "{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
-    }
-}
-
-impl MqttHandle {
-    pub async fn publish_reading(&self, reading: &Reading) -> Result<(), fmt::Error> {
-        let action = build_telemetry_action(reading)
-            .inspect_err(|err| warn!("failed to serialize telemetry payload: {err:?}"))?;
-        self.publish(action).await
     }
 }

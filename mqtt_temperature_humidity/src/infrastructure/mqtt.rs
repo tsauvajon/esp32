@@ -14,7 +14,7 @@ use mountain_mqtt::packets::publish::ApplicationMessage;
 use mountain_mqtt_embassy::mqtt_manager::{self, FromApplicationMessage, MqttEvent, Settings};
 
 use crate::application::{
-    ApplicationAction, PAYLOAD_CAPACITY, STATUS_INTERVAL_SECS, build_status_action,
+    ApplicationAction, ApplicationPublisher, PAYLOAD_CAPACITY, StatusProvider,
 };
 
 const MQTT_BROKER_IP: &str = env!("MQTT_BROKER_IP");
@@ -26,6 +26,7 @@ const MQTT_PASSWORD: Option<&str> = option_env!("MQTT_PASSWORD");
 const ACTION_QUEUE: usize = 8;
 const EVENT_QUEUE: usize = 8;
 const MQTT_BUFFER_SIZE: usize = 1024;
+const STATUS_INTERVAL_SECS: u64 = 60;
 
 type ActionChannel = Channel<NoopRawMutex, MqttAction, ACTION_QUEUE>;
 type EventChannelInner = Channel<NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
@@ -43,7 +44,11 @@ pub struct MqttHandle {
 }
 
 impl MqttHandle {
-    pub fn start(stack: Stack<'static>, spawner: &Spawner) -> Self {
+    pub fn start(
+        stack: Stack<'static>,
+        spawner: &Spawner,
+        status_provider: &'static dyn StatusProvider,
+    ) -> Self {
         let broker_ip = MQTT_BROKER_IP
             .parse()
             .unwrap_or_else(|_| panic!("invalid MQTT_BROKER_IP: {MQTT_BROKER_IP}"));
@@ -83,24 +88,29 @@ impl MqttHandle {
                 event_receiver,
                 action_sender.clone(),
                 stack,
+                status_provider,
             ))
             .ok()
             .expect("spawn MQTT event task");
 
         spawner
-            .spawn(status_publisher_task(stack, action_sender.clone()))
+            .spawn(status_publisher_task(
+                stack,
+                action_sender.clone(),
+                status_provider,
+            ))
             .ok()
             .expect("spawn MQTT status task");
 
         Self { action_sender }
     }
+}
 
-    pub async fn publish<M>(&self, message: M) -> Result<(), fmt::Error>
-    where
-        MqttAction: From<M>,
-    {
-        let action = MqttAction::from(message);
-        self.action_sender.send(action).await;
+impl ApplicationPublisher for MqttHandle {
+    async fn publish(&self, action: ApplicationAction) -> Result<(), fmt::Error> {
+        let sender = self.action_sender.clone();
+        let action = MqttAction::from(action);
+        sender.send(action).await;
         Ok(())
     }
 }
@@ -116,10 +126,14 @@ fn build_manager_settings(address: Ipv4Address, port: u16) -> Settings {
     settings
 }
 
-async fn enqueue_status(sender: ActionSender, stack: Stack<'static>) {
-    match build_status_action(stack) {
-        Ok(action) => sender.send(action.into()).await,
-        Err(err) => warn!("failed to serialize status payload: {err:?}"),
+async fn enqueue_status(
+    sender: &ActionSender,
+    stack: Stack<'static>,
+    provider: &dyn StatusProvider,
+) {
+    match provider.build_status_action(stack) {
+        Ok(action) => sender.send(MqttAction::from(action)).await,
+        Err(err) => warn!("failed to build status payload: {err:?}"),
     }
 }
 
@@ -132,7 +146,7 @@ pub struct MqttAction {
 }
 
 impl MqttAction {
-    fn new(
+    pub(crate) fn new(
         topic: &'static str,
         payload: String<PAYLOAD_CAPACITY>,
         qos: QualityOfService,
@@ -149,7 +163,7 @@ impl MqttAction {
 
 impl From<ApplicationAction> for MqttAction {
     fn from(value: ApplicationAction) -> Self {
-        Self::new(value.topic, value.payload, value.qos, value.retain)
+        MqttAction::new(value.topic, value.payload, value.qos, value.retain)
     }
 }
 
@@ -205,11 +219,14 @@ async fn mqtt_event_task(
     receiver: EventReceiver,
     action_sender: ActionSender,
     stack: Stack<'static>,
+    status_provider: &'static dyn StatusProvider,
 ) -> ! {
     loop {
         match receiver.receive().await {
             MqttEvent::Connected { .. } => info!("MQTT connected"),
-            MqttEvent::ConnectionStable { .. } => enqueue_status(action_sender, stack).await,
+            MqttEvent::ConnectionStable { .. } => {
+                enqueue_status(&action_sender, stack, status_provider).await
+            }
             MqttEvent::Disconnected { error, .. } => warn!("MQTT disconnected: {error:?}"),
             MqttEvent::ApplicationEvent { .. } => {
                 warn!("received unexpected MQTT application event")
@@ -222,9 +239,13 @@ async fn mqtt_event_task(
 }
 
 #[embassy_executor::task]
-async fn status_publisher_task(stack: Stack<'static>, action_sender: ActionSender) -> ! {
+async fn status_publisher_task(
+    stack: Stack<'static>,
+    action_sender: ActionSender,
+    status_provider: &'static dyn StatusProvider,
+) -> ! {
     loop {
-        enqueue_status(action_sender, stack).await;
+        enqueue_status(&action_sender, stack, status_provider).await;
         Timer::after(Duration::from_secs(STATUS_INTERVAL_SECS)).await;
     }
 }
