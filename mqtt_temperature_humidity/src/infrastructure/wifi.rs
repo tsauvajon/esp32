@@ -83,7 +83,7 @@ async fn connection_task(mut controller: WifiController<'static>) {
             | WifiStaState::Stopped
             | WifiStaState::Invalid
             | _ => {
-                info!("Wi-Fi Station status: {:?}", esp_radio::wifi::ap_state());
+                info!("Wi-Fi Station status: {:?}", esp_radio::wifi::sta_state());
             }
         }
 

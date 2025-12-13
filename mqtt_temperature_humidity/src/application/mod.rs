@@ -73,14 +73,14 @@ struct StatusPayload {
     online: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     rssi_dbm: Option<i32>,
-    #[serde(rename = "upstime_s")]
+    #[serde(rename = "uptime_s")]
     uptime_seconds: u64,
     firmware: &'static str,
     #[serde(rename = "mac")]
     mac_address: MacAddress,
     #[serde(rename = "ip")]
     #[serde(skip_serializing_if = "Option::is_none")]
-    ip: Option<Ipv4Address>,
+    ip_address: Option<Ipv4Address>,
 }
 
 pub fn build_telemetry_message(reading: &Reading) -> Result<Message, fmt::Error> {
@@ -103,7 +103,7 @@ fn build_status_message(stack: Stack<'static>) -> Result<Message, fmt::Error> {
         uptime_seconds: Instant::now().as_secs(),
         firmware: FIRMWARE,
         mac_address: MacAddress(wifi::sta_mac()),
-        ip: stack.config_v4().map(|cfg| cfg.address.address()),
+        ip_address: stack.config_v4().map(|cfg| cfg.address.address()),
     };
 
     let payload = serialize_payload(&status)?;
