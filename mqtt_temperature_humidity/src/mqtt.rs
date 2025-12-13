@@ -20,9 +20,9 @@ const MQTT_BROKER_PORT: &str = env!("MQTT_BROKER_PORT");
 const MQTT_CLIENT_ID: &str = env!("MQTT_CLIENT_ID");
 const MQTT_TOPIC_TELEMETRY: &str = env!("MQTT_TOPIC_TELEMETRY");
 const MQTT_TOPIC_STATUS: &str = env!("MQTT_TOPIC_STATUS");
+const MQTT_USERNAME: Option<&str> = option_env!("MQTT_USERNAME");
+const MQTT_PASSWORD: Option<&str> = option_env!("MQTT_PASSWORD");
 const FIRMWARE: &str = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"));
-
-// option_env for mqtt auth
 
 const ACTION_QUEUE: usize = 8;
 const EVENT_QUEUE: usize = 8;
@@ -44,15 +44,25 @@ type EventReceiver =
     Receiver<'static, CriticalSectionRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
 
 pub fn start(stack: Stack<'static>, spawner: &Spawner) {
-    let broker_ip = parse_broker_ip();
-    let broker_port = parse_broker_port();
-    let connection_settings = ConnectionSettings::unauthenticated(MQTT_CLIENT_ID);
+    let broker_ip = MQTT_BROKER_IP
+        .parse()
+        .unwrap_or_else(|_| panic!("invalid MQTT_BROKER_IP: {MQTT_BROKER_IP}"));
+    let broker_port = MQTT_BROKER_PORT
+        .parse()
+        .unwrap_or_else(|_| panic!("invalid MQTT_BROKER_PORT: {MQTT_BROKER_PORT}"));
+    let connection_settings =
+        if let (Some(username), Some(password)) = (MQTT_USERNAME, MQTT_PASSWORD) {
+            ConnectionSettings::authenticated(MQTT_CLIENT_ID, username, password.as_bytes())
+        } else {
+            ConnectionSettings::unauthenticated(MQTT_CLIENT_ID)
+        };
+
     let settings = build_manager_settings(broker_ip, broker_port);
 
     let event_sender = EVENT_CHANNEL.sender();
     let action_receiver = ACTION_CHANNEL.receiver();
-    let event_receiver = EVENT_CHANNEL.receiver();
     let action_sender = ACTION_CHANNEL.sender();
+    let event_receiver = EVENT_CHANNEL.receiver();
 
     spawner
         .spawn(mqtt_manager_task(
@@ -76,12 +86,11 @@ pub fn start(stack: Stack<'static>, spawner: &Spawner) {
         .expect("spawn MQTT status task");
 }
 
-/// Queue a telemetry publish for the given reading.
-pub async fn publish_reading(reading: &Reading) {
-    match build_telemetry_action(reading) {
-        Ok(action) => ACTION_CHANNEL.sender().send(action).await,
-        Err(err) => warn!("failed to serialize telemetry payload: {err:?}"),
-    }
+pub async fn publish_reading(reading: &Reading) -> Result<(), fmt::Error> {
+    let action = build_telemetry_action(reading)
+        .inspect_err(|err| warn!("failed to serialize telemetry payload: {err:?}"))?;
+    ACTION_CHANNEL.sender().send(action).await;
+    Ok(())
 }
 
 fn build_manager_settings(address: Ipv4Address, port: u16) -> Settings {
@@ -93,30 +102,6 @@ fn build_manager_settings(address: Ipv4Address, port: u16) -> Settings {
     settings.response_timeout = Duration::from_secs(5);
     settings.stabilisation_interval = Duration::from_secs(10);
     settings
-}
-
-fn parse_broker_ip() -> Ipv4Address {
-    let mut octets = [0u8; 4];
-    let mut count = 0;
-    for part in MQTT_BROKER_IP.split('.') {
-        if count == 4 {
-            panic!("MQTT_BROKER_IP has too many parts");
-        }
-        octets[count] = part
-            .parse::<u8>()
-            .unwrap_or_else(|_| panic!("invalid MQTT_BROKER_IP: {MQTT_BROKER_IP}"));
-        count += 1;
-    }
-    if count != 4 {
-        panic!("MQTT_BROKER_IP must have four octets");
-    }
-    Ipv4Address::new(octets[0], octets[1], octets[2], octets[3])
-}
-
-fn parse_broker_port() -> u16 {
-    MQTT_BROKER_PORT
-        .parse::<u16>()
-        .unwrap_or_else(|_| panic!("invalid MQTT_BROKER_PORT: {MQTT_BROKER_PORT}"))
 }
 
 fn build_telemetry_action(reading: &Reading) -> Result<MqttAction, fmt::Error> {
@@ -141,16 +126,17 @@ fn build_status_action(stack: Stack<'static>) -> Result<MqttAction, fmt::Error> 
     write!(&mut payload, "{{\"online\":{}", online)?;
 
     if let Some(rssi) = read_rssi_dbm() {
-        write!(&mut payload, ",\"rssi_dbm\":{}", rssi)?;
+        write!(&mut payload, r#","rssi_dbm":{rssi}"#)?;
     } else {
         push_literal(&mut payload, ",\"rssi_dbm\":null")?;
     }
 
     write!(&mut payload, ",\"uptime_s\":{}", Instant::now().as_secs())?;
-    write!(&mut payload, ",\"firmware\":\"{}\"", FIRMWARE)?;
+    write!(&mut payload, ",\"firmware\":\"{FIRMWARE}\"")?;
+    // write!(&mut payload, ",\"mac\":\"{}\"", wifi::sta_mac())?;
 
     match ipv4_string(stack) {
-        Some(ip) => write!(&mut payload, ",\"ip\":\"{}\"", ip)?,
+        Some(ip) => write!(&mut payload, r#","ip":"{ip}""#)?,
         None => push_literal(&mut payload, ",\"ip\":null")?,
     }
 
@@ -162,20 +148,6 @@ fn build_status_action(stack: Stack<'static>) -> Result<MqttAction, fmt::Error> 
         QualityOfService::Qos1,
         true,
     ))
-}
-
-fn ipv4_string(stack: Stack<'static>) -> Option<String<32>> {
-    let config = stack.config_v4()?;
-    let addr = config.address.address();
-    let octets = addr.octets();
-    let mut buf: String<32> = String::new();
-    write!(
-        &mut buf,
-        "{}.{}.{}.{}",
-        octets[0], octets[1], octets[2], octets[3]
-    )
-    .ok()?;
-    Some(buf)
 }
 
 fn push_literal<const N: usize>(buf: &mut String<N>, literal: &str) -> Result<(), fmt::Error> {
@@ -303,4 +275,18 @@ async fn status_publisher_task(stack: Stack<'static>, action_sender: ActionSende
         enqueue_status(action_sender, stack).await;
         Timer::after(Duration::from_secs(STATUS_INTERVAL_SECS)).await;
     }
+}
+
+fn ipv4_string(stack: Stack<'static>) -> Option<String<32>> {
+    let config = stack.config_v4()?;
+    let addr = config.address.address();
+    let octets = addr.octets();
+    let mut buf: String<32> = String::new();
+    write!(
+        &mut buf,
+        "{}.{}.{}.{}",
+        octets[0], octets[1], octets[2], octets[3]
+    )
+    .ok()?;
+    Some(buf)
 }

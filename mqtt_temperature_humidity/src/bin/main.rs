@@ -78,6 +78,6 @@ async fn main(spawner: Spawner) -> ! {
     loop {
         let reading = receiver.receive().await;
         println!("{reading:?}");
-        mqtt::publish_reading(&reading).await;
+        let _ = mqtt::publish_reading(&reading).await;
     }
 }
