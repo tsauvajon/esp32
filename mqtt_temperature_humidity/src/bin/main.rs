@@ -34,8 +34,15 @@ esp_bootloader_esp_idf::esp_app_desc!();
 // https://docs.espressif.com/projects/esp-idf/en/stable/esp32c3/api-reference/peripherals/i2c.html
 const I2C_FAST_MODE_KHZ: u32 = 400;
 
+fn init_heap() {
+    // Provide heap backing for esp-alloc so Wi-Fi/MQTT drivers can allocate.
+    // Else: OOM -> panic at startup
+    esp_alloc::heap_allocator!(size: 64 * 1024);
+}
+
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
+    init_heap();
     esp_println::logger::init_logger_from_env();
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
 

@@ -28,6 +28,7 @@ esp-backtrace = { version = "0.18.1", features = [
   "panic-handler",
   "println",
 ] }
+esp-alloc = "0.9.0"
 esp-hal = { version = "1.0.0", features = ["esp32c3", "log-04", "unstable"] }
 esp-println = { version = "0.16.1", features = ["esp32c3", "log-04"] }
 esp-radio = { version = "0.17.0", features = [
