@@ -1,83 +1,103 @@
+# Example configuration for translating the ESP32 MQTT payloads from this
+# repository into Prometheus metrics with mqtt2prometheus.
 mqtt:
-  subscriptions:
-    - topic: home/+/+/+/state
+  topic_path: home/bedroom/temp1/+/state
+  device_id_regex: "(?P<org>[^/]+)/(?P<location>[^/]+)/(?P<deviceid>[^/]+)/.*"
+
+json_parsing:
+  separator: "."
 
 metrics:
-  # Telemetry payload
-  - name: temperature_celsius
-    help: "Sensor temperature (°C)"
-    topic: home/+/+/tele/state
+  # Telemetry -----------------------------------------------------
+  - prom_name: temperature_celsius
+    mqtt_name: temperature_c
+    help: Temperature in degrees Celsius
     type: gauge
-    json: temperature_c
-    labels_from_topic: [location, device]
+    const_labels:
+      payload: telemetry
 
-  - name: humidity_percent
-    help: "Sensor relative humidity (%)"
-    topic: home/+/+/tele/state
+  - prom_name: humidity_percent
+    mqtt_name: humidity_pct
+    help: Relative humidity in percent
     type: gauge
-    json: humidity_pct
-    labels_from_topic: [location, device]
+    const_labels:
+      payload: telemetry
 
-  # Status payload
-  - name: device_online
-    help: "Status payload online flag (1 = link up)"
-    topic: home/+/+/status/state
+  # Status -----------------------------------------------------
+
+  - prom_name: online
+    mqtt_name: online
+    help: 1 the Wi-Fi link is reported as up
     type: gauge
-    json: online
-    labels_from_topic: [location, device]
+    raw_expression: "raw_value ? 1 : 0"
+    const_labels:
+      payload: status
 
-  - name: wifi_rssi_dbm
-    help: "Wi-Fi RSSI (dBm)"
-    topic: home/+/+/status/state
+  - prom_name: wifi_rssi_dbm
+    mqtt_name: rssi_dbm
+    help: Wi-Fi RSSI (signal strength) in dBm
     type: gauge
-    json: rssi_dbm
-    labels_from_topic: [location, device]
+    const_labels:
+      payload: status
 
-  - name: uptime_seconds
-    help: "Device uptime in seconds"
-    topic: home/+/+/status/state
+  - prom_name: uptime_seconds
+    mqtt_name: uptime_s
+    help: Device uptime in seconds
     type: counter
-    json: uptime_s
-    labels_from_topic: [location, device]
+    force_monotonicy: true
+    const_labels:
+      payload: status
 
-  - name: heap_used_bytes
-    help: "Heap usage (bytes)"
-    topic: home/+/+/status/state
+  - prom_name: heap_total_bytes
+    mqtt_name: heap_total_bytes
+    help: Total heap size in bytes
     type: gauge
-    json: heap_used_bytes
-    labels_from_topic: [location, device]
+    const_labels:
+      payload: status
 
-  - name: heap_total_bytes
-    help: "Total heap size (bytes)"
-    topic: home/+/+/status/state
+  - prom_name: heap_used_bytes
+    mqtt_name: heap_used_bytes
+    help: Heap usage in bytes
     type: gauge
-    json: heap_total_bytes
-    labels_from_topic: [location, device]
+    const_labels:
+      payload: status
 
-  - name: wifi_channel
-    help: "Associated Wi-Fi channel"
-    topic: home/+/+/status/state
+  - prom_name: wifi_channel
+    mqtt_name: channel
+    help: Wi-Fi channel number
     type: gauge
-    json: channel
-    labels_from_topic: [location, device]
+    const_labels:
+      payload: status
 
-  - name: last_sensor_ok_seconds_ago
-    help: "Seconds since last sensor reading"
-    topic: home/+/+/status/state
+  - prom_name: last_sensor_ok_seconds
+    mqtt_name: last_sensor_ok_seconds_ago
+    help: Seconds elapsed since the last successful sensor reading
     type: gauge
-    json: last_sensor_ok_seconds_ago
-    labels_from_topic: [location, device]
+    const_labels:
+      payload: status
+  
+  # Metadata -----------------------------------------------------
 
-  - name: device_status_info
-    help: "String fields from status payload exposed as labels (value always 1)"
-    topic: home/+/+/status/state
+  - prom_name: device_metadata_info
+    mqtt_name: device_info
+    help: Static device metadata exposed as labels
     type: gauge
-    json: 1
-    labels_from_topic: [location, device]
-    labels:
-      firmware: firmware
-      mac: mac
-      ip_address: ip
-      gateway_ip: gateway_ip
-      connected_bssid: bssid
-      reset_reason: reset_reason
+    raw_expression: "1"
+    const_labels:
+      payload: status
+    dynamic_labels:
+      firmware: 'raw_value["firmware"]'
+      chip: 'raw_value["chip"]'
+      mac: 'raw_value["mac"]'
+      ip: 'raw_value["ip"] == nil ? "" : raw_value["ip"]'
+      bssid: 'raw_value["bssid"] == nil ? "" : raw_value["bssid"]'
+
+  - prom_name: device_reset_reason_info
+    mqtt_name: reset_reason
+    help: Last reset reason emitted by the firmware
+    type: gauge
+    raw_expression: "1"
+    const_labels:
+      payload: status
+    dynamic_labels:
+      reset_reason: "raw_value"
