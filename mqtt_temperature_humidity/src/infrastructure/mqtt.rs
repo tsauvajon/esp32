@@ -5,7 +5,7 @@ use embassy_net::{Ipv4Address, Stack};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::{Duration, Timer};
-use heapless::String;
+use serde_json_core::heapless::String;
 use log::{info, warn};
 use mountain_mqtt::client::{Client, ClientError, ConnectionSettings, EventHandlerError};
 use mountain_mqtt::data::quality_of_service::QualityOfService;

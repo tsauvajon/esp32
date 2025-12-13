@@ -3,11 +3,11 @@ use core::fmt::{self, Write};
 use embassy_net::{Ipv4Address, Stack};
 use embassy_time::Instant;
 use esp_radio::wifi::{self, WifiStaState};
-use heapless::String;
 use log::warn;
 use mountain_mqtt::data::quality_of_service::QualityOfService;
 use serde::Serialize;
 use serde::Serializer;
+use serde_json_core::heapless::String;
 use serde_json_core::to_string;
 use sht31::Reading;
 
@@ -84,9 +84,8 @@ struct StatusPayload {
 }
 
 pub fn build_telemetry_message(reading: &Reading) -> Result<Message, fmt::Error> {
-    let payload = TelemetryPayload::from(reading);
-
-    let payload = serialize_payload(&payload)?;
+    let payload = to_string::<_, PAYLOAD_CAPACITY>(&TelemetryPayload::from(reading))
+        .map_err(|_| fmt::Error)?;
 
     Ok(Message {
         topic: MQTT_TOPIC_TELEMETRY,
@@ -106,7 +105,7 @@ fn build_status_message(stack: Stack<'static>) -> Result<Message, fmt::Error> {
         ip_address: stack.config_v4().map(|cfg| cfg.address.address()),
     };
 
-    let payload = serialize_payload(&status)?;
+    let payload = to_string::<_, PAYLOAD_CAPACITY>(&status).map_err(|_| fmt::Error)?;
 
     Ok(Message {
         topic: MQTT_TOPIC_STATUS,
@@ -147,11 +146,4 @@ impl Serialize for MacAddress {
         write!(&mut buf, "{self}").map_err(|_| serde::ser::Error::custom("format MAC address"))?;
         serializer.serialize_str(buf.as_str())
     }
-}
-
-fn serialize_payload<T: Serialize>(payload: &T) -> Result<String<PAYLOAD_CAPACITY>, fmt::Error> {
-    let json = to_string::<_, PAYLOAD_CAPACITY>(payload).map_err(|_| fmt::Error)?;
-    let mut out = String::new();
-    out.push_str(json.as_str()).map_err(|_| fmt::Error)?;
-    Ok(out)
 }
