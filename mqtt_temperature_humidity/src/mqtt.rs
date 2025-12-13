@@ -2,7 +2,7 @@ use core::fmt::{self, Write};
 
 use embassy_executor::Spawner;
 use embassy_net::{Ipv4Address, Stack};
-use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
 use embassy_time::{Duration, Instant, Timer};
 use esp_radio::wifi::{self, WifiStaState};
@@ -30,18 +30,13 @@ const MQTT_BUFFER_SIZE: usize = 1024;
 const PAYLOAD_CAPACITY: usize = 256;
 const STATUS_INTERVAL_SECS: u64 = 60;
 
-static ACTION_CHANNEL: Channel<CriticalSectionRawMutex, MqttAction, ACTION_QUEUE> = Channel::new();
-static EVENT_CHANNEL: Channel<
-    CriticalSectionRawMutex,
-    MqttEvent<NoopApplicationEvent>,
-    EVENT_QUEUE,
-> = Channel::new();
+static ACTION_CHANNEL: Channel<NoopRawMutex, MqttAction, ACTION_QUEUE> = Channel::new();
+static EVENT_CHANNEL: Channel<NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE> =
+    Channel::new();
 
-type ActionSender = Sender<'static, CriticalSectionRawMutex, MqttAction, ACTION_QUEUE>;
-type EventSender =
-    Sender<'static, CriticalSectionRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
-type EventReceiver =
-    Receiver<'static, CriticalSectionRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
+type ActionSender = Sender<'static, NoopRawMutex, MqttAction, ACTION_QUEUE>;
+type EventSender = Sender<'static, NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
+type EventReceiver = Receiver<'static, NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
 
 pub fn start(stack: Stack<'static>, spawner: &Spawner) {
     let broker_ip = MQTT_BROKER_IP
@@ -133,11 +128,13 @@ fn build_status_action(stack: Stack<'static>) -> Result<MqttAction, fmt::Error> 
 
     write!(&mut payload, ",\"uptime_s\":{}", Instant::now().as_secs())?;
     write!(&mut payload, ",\"firmware\":\"{FIRMWARE}\"")?;
-    // write!(&mut payload, ",\"mac\":\"{}\"", wifi::sta_mac())?;
+    write!(&mut payload, ",\"mac\":\"{}\"", MacAddress(wifi::sta_mac()))?;
 
-    match ipv4_string(stack) {
-        Some(ip) => write!(&mut payload, r#","ip":"{ip}""#)?,
-        None => push_literal(&mut payload, ",\"ip\":null")?,
+    if let Some(config) = stack.config_v4() {
+        let ip = IpAddress(config.address.address());
+        write!(&mut payload, r#","ip":"{ip}""#)?;
+    } else {
+        push_literal(&mut payload, ",\"ip\":null")?;
     }
 
     payload.push('}').map_err(|_| fmt::Error)?;
@@ -161,6 +158,28 @@ fn read_rssi_dbm() -> Option<i32> {
     let mut rssi: i32 = 0;
     let err = unsafe { esp_wifi_sys::include::esp_wifi_sta_get_rssi(&mut rssi) };
     if err == 0 { Some(rssi) } else { None }
+}
+
+struct MacAddress([u8; 6]);
+
+impl fmt::Display for MacAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bytes = &self.0;
+        write!(
+            f,
+            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]
+        )
+    }
+}
+
+struct IpAddress(Ipv4Address);
+
+impl fmt::Display for IpAddress {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let octets = &self.0.octets();
+        write!(f, "{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
+    }
 }
 
 async fn enqueue_status(sender: ActionSender, stack: Stack<'static>) {
@@ -229,12 +248,11 @@ async fn mqtt_manager_task(
     connection_settings: ConnectionSettings<'static>,
     settings: Settings,
     event_sender: EventSender,
-    action_receiver: Receiver<'static, CriticalSectionRawMutex, MqttAction, ACTION_QUEUE>,
+    action_receiver: Receiver<'static, NoopRawMutex, MqttAction, ACTION_QUEUE>,
 ) -> ! {
     mqtt_manager::run::<
         MqttAction,
         NoopApplicationEvent,
-        CriticalSectionRawMutex,
         0,
         MQTT_BUFFER_SIZE,
         ACTION_QUEUE,
@@ -275,18 +293,4 @@ async fn status_publisher_task(stack: Stack<'static>, action_sender: ActionSende
         enqueue_status(action_sender, stack).await;
         Timer::after(Duration::from_secs(STATUS_INTERVAL_SECS)).await;
     }
-}
-
-fn ipv4_string(stack: Stack<'static>) -> Option<String<32>> {
-    let config = stack.config_v4()?;
-    let addr = config.address.address();
-    let octets = addr.octets();
-    let mut buf: String<32> = String::new();
-    write!(
-        &mut buf,
-        "{}.{}.{}.{}",
-        octets[0], octets[1], octets[2], octets[3]
-    )
-    .ok()?;
-    Some(buf)
 }
