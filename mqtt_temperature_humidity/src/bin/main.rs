@@ -7,18 +7,19 @@
 )]
 
 use embassy_executor::Spawner;
-use embassy_futures::select::{Either, select};
-use embassy_sync::{
-    blocking_mutex::raw::CriticalSectionRawMutex,
-    channel::{Channel, Receiver},
-};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, channel::Channel};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::i2c::master::{Config as I2cConfig, I2c};
 use esp_hal::time::Rate;
 use esp_hal::timer::timg::TimerGroup;
+use esp_println::println;
+use esp_radio::Controller;
+use esp_radio::wifi::Config as WifiConfig;
 use log::info;
+use portable_temp_display::mk_static;
 use portable_temp_display::temp_humidity;
+use portable_temp_display::wifi::start_wifi;
 use sht31::Reading;
 
 const SENSOR_CHANNEL_SIZE: usize = 4;
@@ -53,6 +54,7 @@ async fn main(spawner: Spawner) -> ! {
 
     info!("Embassy initialized!");
 
+    // ######### SHT31 Temperature Sensor
     let frequency = Rate::from_khz(I2C_FAST_MODE_KHZ);
     let i2c = I2c::new(i2c_driver, I2cConfig::default().with_frequency(frequency))
         .unwrap()
@@ -62,8 +64,17 @@ async fn main(spawner: Spawner) -> ! {
     spawner
         .spawn(temp_humidity::run(i2c, SENSOR_CHANNEL.dyn_sender()))
         .unwrap();
+    let receiver = SENSOR_CHANNEL.receiver();
+
+    // ######### WiFi
+    let rng = esp_hal::rng::Rng::new();
+    let radio_init = &*mk_static!(Controller, esp_radio::init().unwrap());
+    let (wifi_controller, interfaces) =
+        esp_radio::wifi::new(&radio_init, peripherals.WIFI, WifiConfig::default()).unwrap();
+    let stack = start_wifi(wifi_controller, interfaces, rng, &spawner).await;
 
     loop {
-        // TODO: send mqtt data
+        let reading = receiver.receive().await;
+        println!("{reading:?}");
     }
 }
