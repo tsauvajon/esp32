@@ -145,25 +145,14 @@ pub struct MqttAction {
     retain: bool,
 }
 
-impl MqttAction {
-    pub(crate) fn new(
-        topic: &'static str,
-        payload: String<PAYLOAD_CAPACITY>,
-        qos: QualityOfService,
-        retain: bool,
-    ) -> Self {
-        Self {
-            topic,
-            payload,
-            qos,
-            retain,
-        }
-    }
-}
-
 impl From<ApplicationAction> for MqttAction {
     fn from(value: ApplicationAction) -> Self {
-        MqttAction::new(value.topic, value.payload, value.qos, value.retain)
+        MqttAction {
+            topic: value.topic,
+            payload: value.payload,
+            qos: value.qos,
+            retain: value.retain,
+        }
     }
 }
 

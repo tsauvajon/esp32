@@ -1,6 +1,6 @@
 use core::fmt::{self, Write};
 
-use embassy_net::{Ipv4Address, Stack};
+use embassy_net::Stack;
 use embassy_time::Instant;
 use esp_radio::wifi::{self, WifiStaState};
 use heapless::String;
@@ -72,7 +72,9 @@ fn build_status_action(stack: Stack<'static>) -> Result<ApplicationAction, fmt::
     if let Some(rssi) = read_rssi_dbm() {
         write!(&mut payload, r#","rssi_dbm":{rssi}"#)?;
     } else {
-        push_literal(&mut payload, ",\"rssi_dbm\":null")?;
+        payload
+            .push_str(",\"rssi_dbm\":null")
+            .map_err(|_| fmt::Error)?;
     }
 
     write!(&mut payload, ",\"uptime_s\":{}", Instant::now().as_secs())?;
@@ -80,10 +82,10 @@ fn build_status_action(stack: Stack<'static>) -> Result<ApplicationAction, fmt::
     write!(&mut payload, ",\"mac\":\"{}\"", MacAddress(wifi::sta_mac()))?;
 
     if let Some(config) = stack.config_v4() {
-        let ip = IpAddress(config.address.address());
+        let ip = config.address.address();
         write!(&mut payload, r#","ip":"{ip}""#)?;
     } else {
-        push_literal(&mut payload, ",\"ip\":null")?;
+        payload.push_str(",\"ip\":null").map_err(|_| fmt::Error)?;
     }
 
     payload.push('}').map_err(|_| fmt::Error)?;
@@ -94,10 +96,6 @@ fn build_status_action(stack: Stack<'static>) -> Result<ApplicationAction, fmt::
         qos: QualityOfService::Qos1,
         retain: true,
     })
-}
-
-fn push_literal<const N: usize>(buf: &mut String<N>, literal: &str) -> Result<(), fmt::Error> {
-    buf.push_str(literal).map_err(|_| fmt::Error)
 }
 
 fn read_rssi_dbm() -> Option<i32> {
@@ -119,14 +117,5 @@ impl fmt::Display for MacAddress {
             "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]
         )
-    }
-}
-
-struct IpAddress(Ipv4Address);
-
-impl fmt::Display for IpAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let octets = &self.0.octets();
-        write!(f, "{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
     }
 }
