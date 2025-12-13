@@ -1,8 +1,7 @@
 #![no_std]
 
-pub mod mqtt;
-pub mod temp_humidity;
-pub mod wifi;
+pub mod application;
+pub mod infrastructure;
 
 #[macro_export]
 macro_rules! mk_static {

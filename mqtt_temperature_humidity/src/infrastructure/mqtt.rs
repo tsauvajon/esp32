@@ -1,11 +1,10 @@
-use core::fmt::{self, Write};
+use core::fmt;
 
 use embassy_executor::Spawner;
 use embassy_net::{Ipv4Address, Stack};
 use embassy_sync::blocking_mutex::raw::NoopRawMutex;
 use embassy_sync::channel::{Channel, Receiver, Sender};
-use embassy_time::{Duration, Instant, Timer};
-use esp_radio::wifi::{self, WifiStaState};
+use embassy_time::{Duration, Timer};
 use heapless::String;
 use log::{info, warn};
 use mountain_mqtt::client::{Client, ClientError, ConnectionSettings, EventHandlerError};
@@ -15,20 +14,20 @@ use mountain_mqtt::packets::publish::ApplicationMessage;
 use mountain_mqtt_embassy::mqtt_manager::{self, FromApplicationMessage, MqttEvent, Settings};
 use sht31::Reading;
 
+use crate::application::{
+    ApplicationAction, PAYLOAD_CAPACITY, STATUS_INTERVAL_SECS, build_status_action,
+    build_telemetry_action,
+};
+
 const MQTT_BROKER_IP: &str = env!("MQTT_BROKER_IP");
 const MQTT_BROKER_PORT: &str = env!("MQTT_BROKER_PORT");
 const MQTT_CLIENT_ID: &str = env!("MQTT_CLIENT_ID");
-const MQTT_TOPIC_TELEMETRY: &str = env!("MQTT_TOPIC_TELEMETRY");
-const MQTT_TOPIC_STATUS: &str = env!("MQTT_TOPIC_STATUS");
 const MQTT_USERNAME: Option<&str> = option_env!("MQTT_USERNAME");
 const MQTT_PASSWORD: Option<&str> = option_env!("MQTT_PASSWORD");
-const FIRMWARE: &str = concat!(env!("CARGO_PKG_NAME"), " ", env!("CARGO_PKG_VERSION"));
 
 const ACTION_QUEUE: usize = 8;
 const EVENT_QUEUE: usize = 8;
 const MQTT_BUFFER_SIZE: usize = 1024;
-const PAYLOAD_CAPACITY: usize = 256;
-const STATUS_INTERVAL_SECS: u64 = 60;
 
 type ActionChannel = Channel<NoopRawMutex, MqttAction, ACTION_QUEUE>;
 type EventChannelInner = Channel<NoopRawMutex, MqttEvent<NoopApplicationEvent>, EVENT_QUEUE>;
@@ -100,7 +99,7 @@ pub fn start(stack: Stack<'static>, spawner: &Spawner) -> MqttHandle {
 pub async fn publish_reading(handle: &MqttHandle, reading: &Reading) -> Result<(), fmt::Error> {
     let action = build_telemetry_action(reading)
         .inspect_err(|err| warn!("failed to serialize telemetry payload: {err:?}"))?;
-    handle.action_sender.send(action).await;
+    handle.action_sender.send(action.into()).await;
     Ok(())
 }
 
@@ -115,92 +114,9 @@ fn build_manager_settings(address: Ipv4Address, port: u16) -> Settings {
     settings
 }
 
-fn build_telemetry_action(reading: &Reading) -> Result<MqttAction, fmt::Error> {
-    let mut payload: String<PAYLOAD_CAPACITY> = String::new();
-    write!(
-        &mut payload,
-        "{{\"temperature_c\":{:.2},\"humidity_pct\":{:.2}}}",
-        reading.temperature, reading.humidity
-    )?;
-
-    Ok(MqttAction::new(
-        MQTT_TOPIC_TELEMETRY,
-        payload,
-        QualityOfService::Qos1,
-        false,
-    ))
-}
-
-fn build_status_action(stack: Stack<'static>) -> Result<MqttAction, fmt::Error> {
-    let mut payload: String<PAYLOAD_CAPACITY> = String::new();
-    let online = stack.is_link_up();
-    write!(&mut payload, "{{\"online\":{}", online)?;
-
-    if let Some(rssi) = read_rssi_dbm() {
-        write!(&mut payload, r#","rssi_dbm":{rssi}"#)?;
-    } else {
-        push_literal(&mut payload, ",\"rssi_dbm\":null")?;
-    }
-
-    write!(&mut payload, ",\"uptime_s\":{}", Instant::now().as_secs())?;
-    write!(&mut payload, ",\"firmware\":\"{FIRMWARE}\"")?;
-    write!(&mut payload, ",\"mac\":\"{}\"", MacAddress(wifi::sta_mac()))?;
-
-    if let Some(config) = stack.config_v4() {
-        let ip = IpAddress(config.address.address());
-        write!(&mut payload, r#","ip":"{ip}""#)?;
-    } else {
-        push_literal(&mut payload, ",\"ip\":null")?;
-    }
-
-    payload.push('}').map_err(|_| fmt::Error)?;
-
-    Ok(MqttAction::new(
-        MQTT_TOPIC_STATUS,
-        payload,
-        QualityOfService::Qos1,
-        true,
-    ))
-}
-
-fn push_literal<const N: usize>(buf: &mut String<N>, literal: &str) -> Result<(), fmt::Error> {
-    buf.push_str(literal).map_err(|_| fmt::Error)
-}
-
-fn read_rssi_dbm() -> Option<i32> {
-    if wifi::sta_state() != WifiStaState::Connected {
-        return None;
-    }
-    let mut rssi: i32 = 0;
-    let err = unsafe { esp_wifi_sys::include::esp_wifi_sta_get_rssi(&mut rssi) };
-    if err == 0 { Some(rssi) } else { None }
-}
-
-struct MacAddress([u8; 6]);
-
-impl fmt::Display for MacAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let bytes = &self.0;
-        write!(
-            f,
-            "{:02X}:{:02X}:{:02X}:{:02X}:{:02X}:{:02X}",
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5]
-        )
-    }
-}
-
-struct IpAddress(Ipv4Address);
-
-impl fmt::Display for IpAddress {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let octets = &self.0.octets();
-        write!(f, "{}.{}.{}.{}", octets[0], octets[1], octets[2], octets[3])
-    }
-}
-
 async fn enqueue_status(sender: ActionSender, stack: Stack<'static>) {
     match build_status_action(stack) {
-        Ok(action) => sender.send(action).await,
+        Ok(action) => sender.send(action.into()).await,
         Err(err) => warn!("failed to serialize status payload: {err:?}"),
     }
 }
@@ -226,6 +142,12 @@ impl MqttAction {
             qos,
             retain,
         }
+    }
+}
+
+impl From<ApplicationAction> for MqttAction {
+    fn from(value: ApplicationAction) -> Self {
+        Self::new(value.topic, value.payload, value.qos, value.retain)
     }
 }
 

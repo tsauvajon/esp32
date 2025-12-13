@@ -17,10 +17,10 @@ use esp_println::println;
 use esp_radio::Controller;
 use esp_radio::wifi::Config as WifiConfig;
 use log::info;
+use mqtt_sht31::infrastructure::mqtt;
+use mqtt_sht31::infrastructure::temp_humidity;
+use mqtt_sht31::infrastructure::wifi::start_wifi;
 use mqtt_sht31::mk_static;
-use mqtt_sht31::mqtt;
-use mqtt_sht31::temp_humidity;
-use mqtt_sht31::wifi::start_wifi;
 use sht31::Reading;
 
 const SENSOR_CHANNEL_SIZE: usize = 4;
