@@ -40,6 +40,7 @@ pub enum SingleColorParams {
     UltraSoftNightYellow,
     UltraSoftNightOrange,
     WarmWhite,
+    WledWarmWhite,
 }
 
 impl From<&SingleColorParams> for Hsv {
@@ -53,6 +54,7 @@ impl From<&SingleColorParams> for Hsv {
             SingleColorParams::UltraSoftNightYellow => Hsv::new(0.037, 1.0, 0.3529),
             SingleColorParams::UltraSoftNightOrange => Hsv::new(0.0, 0.8, 0.0784),
             SingleColorParams::WarmWhite => Hsv::new(0.10, 0.16, 0.12),
+            SingleColorParams::WledWarmWhite => Hsv::new(0.083, 0.25, 0.12),
         }
     }
 }

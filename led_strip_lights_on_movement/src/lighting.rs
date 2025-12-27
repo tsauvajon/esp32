@@ -9,10 +9,14 @@ use crate::motion_detection::MotionDetector;
 pub const LIGHT_DURATION: Duration = Duration::from_secs(15);
 pub const GRACE_PERIOD: Duration = Duration::from_secs(4);
 pub const STEP: Duration = Duration::from_millis(100);
-pub const TARGET_BRIGHTNESS: f32 = 0.1;
+pub const TARGET_BRIGHTNESS: f32 = 0.09;
 pub const MIN_BRIGHTNESS: f32 = 0.04;
 const BRIGHTNESS_RANGE: f32 = TARGET_BRIGHTNESS - MIN_BRIGHTNESS;
-const BRIGHTNESS_PROFILE: &[f32] = &[0.0, 0.25, 0.45, 0.65, 0.8, 0.9, 0.96, 1.0];
+// Samples derived from WLED's default gamma fade curve to keep low end warm.
+const WLED_FADE_PROFILE: &[f32] = &[
+    0.0, 0.015, 0.028, 0.045, 0.065, 0.09, 0.12, 0.155, 0.195, 0.24, 0.29, 0.35, 0.42, 0.5, 0.6,
+    0.7, 0.8, 0.88, 0.94, 0.975, 1.0,
+];
 const FADE_INTERVAL: Duration = Duration::from_millis(25);
 const FADE_OUT_DURATION: Duration = Duration::from_secs(5);
 
@@ -323,16 +327,16 @@ fn apply_brightness_profile(progress: f32) -> f32 {
         return 1.0;
     }
 
-    let segments = BRIGHTNESS_PROFILE.len().saturating_sub(1);
+    let segments = WLED_FADE_PROFILE.len().saturating_sub(1);
     if segments == 0 {
         return progress;
     }
 
     let scaled = progress * segments as f32;
     let index = scaled as usize;
-    let next = (index + 1).min(BRIGHTNESS_PROFILE.len() - 1);
-    let start = BRIGHTNESS_PROFILE[index];
-    let end = BRIGHTNESS_PROFILE[next];
+    let next = (index + 1).min(WLED_FADE_PROFILE.len() - 1);
+    let start = WLED_FADE_PROFILE[index];
+    let end = WLED_FADE_PROFILE[next];
     let t = scaled - index as f32;
     start + (end - start) * t
 }

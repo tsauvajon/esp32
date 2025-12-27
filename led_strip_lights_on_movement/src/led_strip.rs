@@ -58,7 +58,7 @@ pub fn build_led_controller<'p>(
 
     ControlBuilder::new_1d()
         .with_layout::<Layout, { Layout::PIXEL_COUNT }>()
-        .with_pattern::<SingleColor>(SingleColorParams::WarmWhite)
+        .with_pattern::<SingleColor>(SingleColorParams::WledWarmWhite)
         .with_driver(ws2812_rmt_driver)
         .with_frame_buffer_size::<{ Ws2812::frame_buffer_size(Layout::PIXEL_COUNT) }>()
         .build()
