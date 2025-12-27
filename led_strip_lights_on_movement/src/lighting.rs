@@ -8,9 +8,9 @@ use crate::motion_detection::MotionDetector;
 
 pub const LIGHT_DURATION: Duration = Duration::from_secs(15);
 pub const GRACE_PERIOD: Duration = Duration::from_secs(4);
-pub const STEP: Duration = Duration::from_millis(10);
-pub const TARGET_BRIGHTNESS: f32 = 0.1;
-const FADE_INTERVAL: Duration = Duration::from_millis(1);
+pub const STEP: Duration = Duration::from_millis(100);
+pub const TARGET_BRIGHTNESS: f32 = 0.07;
+const FADE_INTERVAL: Duration = Duration::from_millis(25);
 const FADE_OUT_DURATION: Duration = Duration::from_secs(5);
 
 pub trait LightControl {
@@ -215,21 +215,17 @@ where
                 continue;
             }
 
-            let progress = elapsed
-                .checked_add(chunk)
-                .unwrap_or(scaled_duration)
-                .as_micros() as f32
-                / total;
+            self.delay_for(chunk);
+            elapsed = elapsed.checked_add(chunk).unwrap_or(scaled_duration);
+            monitor.advance(chunk);
+
+            let progress = elapsed.as_micros() as f32 / total;
             let eased = match curve {
                 TransitionCurve::EaseIn => ease_in_quad(progress),
                 TransitionCurve::EaseOut => ease_out_quad(progress),
             };
             let brightness = interpolate(start, target, eased);
             self.set_brightness(brightness.clamp(0.0, 1.0))?;
-
-            self.delay_for(chunk);
-            elapsed = elapsed.checked_add(chunk).unwrap_or(scaled_duration);
-            monitor.advance(chunk);
         }
 
         self.set_brightness(target)?;
