@@ -5,7 +5,7 @@ extern crate esp_backtrace as _;
 pub mod led_strip;
 pub mod lighting;
 pub mod motion_detection;
-pub mod single_colour;
+pub mod single_color;
 
 #[macro_export]
 macro_rules! mk_static {

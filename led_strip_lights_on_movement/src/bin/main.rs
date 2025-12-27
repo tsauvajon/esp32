@@ -20,7 +20,6 @@ use pir_motion_sensor::motion_detection::{MotionDetector, PirMotionSensor};
 esp_bootloader_esp_idf::esp_app_desc!();
 
 const STARTUP_DELAY: Duration = Duration::from_secs(3); // How long to initially light up before trusting the PIR
-const REQUIRED_CONSECUTIVE_DETECTIONS: u8 = 3;
 
 #[main]
 fn main() -> ! {

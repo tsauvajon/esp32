@@ -6,16 +6,15 @@ use blinksy::{
     leds::Ws2812,
     markers::{Blocking, Dim1d},
 };
-use blinksy_esp::{ClocklessRmt, ClocklessRmtBuilder, time::elapsed};
+use blinksy_esp::{ClocklessRmt, ClocklessRmtBuilder};
 use esp_hal::{
     gpio::interconnect::PeripheralOutput,
-    peripherals::{self, Peripherals},
+    peripherals,
     rmt::{Channel, Rmt, Tx},
     time::Rate,
 };
-use log::info;
 
-use crate::single_colour::{SingleColour, SingleColourParams};
+use crate::single_color::{SingleColor, SingleColorParams};
 
 layout1d!(pub Layout, 300);
 
@@ -25,7 +24,7 @@ pub type RmtControl<'p> = Control<
     Dim1d,
     Blocking,
     Layout,
-    SingleColour,
+    SingleColor,
     ClocklessDriver<
         Ws2812,
         ClocklessRmt<
@@ -35,18 +34,6 @@ pub type RmtControl<'p> = Control<
         >,
     >,
 >;
-
-pub fn _example_run(peripherals: Peripherals) -> ! {
-    let mut led_control = build_led_controller(peripherals.RMT, peripherals.GPIO0);
-    led_control.set_brightness(0.6);
-
-    info!("Started");
-
-    loop {
-        let elapsed_in_ms = elapsed().as_millis();
-        led_control.tick(elapsed_in_ms).unwrap();
-    }
-}
 
 pub fn build_led_controller<'p>(
     rmt: peripherals::RMT<'p>,
@@ -69,12 +56,10 @@ pub fn build_led_controller<'p>(
             )
     };
 
-    let led_control = ControlBuilder::new_1d()
+    ControlBuilder::new_1d()
         .with_layout::<Layout, { Layout::PIXEL_COUNT }>()
-        .with_pattern::<SingleColour>(SingleColourParams::WarmWhite)
+        .with_pattern::<SingleColor>(SingleColorParams::WarmWhite)
         .with_driver(ws2812_rmt_driver)
         .with_frame_buffer_size::<{ Ws2812::frame_buffer_size(Layout::PIXEL_COUNT) }>()
-        .build();
-
-    led_control
+        .build()
 }
