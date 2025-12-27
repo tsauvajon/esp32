@@ -7,12 +7,21 @@ use crate::led_strip::RmtControl;
 use crate::motion_detection::MotionDetector;
 
 pub const LIGHT_DURATION: Duration = Duration::from_secs(6);
-pub const GRACE_PERIOD: Duration = Duration::from_secs(3);
+pub const GRACE_PERIOD: Duration = Duration::from_secs(4);
 pub const STEP: Duration = Duration::from_millis(100);
+pub const TARGET_BRIGHTNESS: f32 = 0.1;
+const FADE_INTERVAL: Duration = Duration::from_millis(1);
 
 pub trait LightControl {
-    fn light_on(&mut self) -> Result<(), ClocklessRmtError>;
-    fn light_off(&mut self) -> Result<(), ClocklessRmtError>;
+    fn set_brightness(&mut self, brightness: f32) -> Result<(), ClocklessRmtError>;
+
+    fn light_on(&mut self) -> Result<(), ClocklessRmtError> {
+        self.set_brightness(TARGET_BRIGHTNESS)
+    }
+
+    fn light_off(&mut self) -> Result<(), ClocklessRmtError> {
+        self.set_brightness(0.0)
+    }
 }
 
 pub struct LedStrip<'a> {
@@ -31,13 +40,8 @@ impl<'a> LedStrip<'a> {
 }
 
 impl<'a> LightControl for LedStrip<'a> {
-    fn light_on(&mut self) -> Result<(), ClocklessRmtError> {
-        self.control.set_brightness(0.05);
-        self.render()
-    }
-
-    fn light_off(&mut self) -> Result<(), ClocklessRmtError> {
-        self.control.set_brightness(0.0);
+    fn set_brightness(&mut self, brightness: f32) -> Result<(), ClocklessRmtError> {
+        self.control.set_brightness(brightness);
         self.render()
     }
 }
@@ -102,9 +106,7 @@ where
         motion_sensor: &mut impl MotionDetector,
         profile: LightingProfile,
     ) -> Result<(), ClocklessRmtError> {
-        self.light_on()?;
-
-        self.delay_for(profile.grace_period);
+        self.fade_to(profile.grace_period, TARGET_BRIGHTNESS)?;
         let mut time_remaining = profile
             .light_duration
             .checked_sub(profile.grace_period)
@@ -127,6 +129,53 @@ where
                 .unwrap_or(Duration::ZERO);
         }
     }
+
+    fn fade_to(
+        &mut self,
+        duration: Duration,
+        target_brightness: f32,
+    ) -> Result<(), ClocklessRmtError> {
+        self.lights.set_brightness(0.0)?;
+        if duration == Duration::ZERO {
+            self.lights.set_brightness(target_brightness)?;
+            return Ok(());
+        }
+
+        let total_us = duration.as_micros();
+        if total_us == 0 {
+            self.lights.set_brightness(target_brightness)?;
+            return Ok(());
+        }
+
+        let mut elapsed = Duration::ZERO;
+        while elapsed < duration {
+            let progress = elapsed.as_micros() as f32 / total_us as f32;
+            let eased = ease_out_quad(progress);
+            self.lights.set_brightness(target_brightness * eased)?;
+
+            let remaining = duration.checked_sub(elapsed).unwrap_or(Duration::ZERO);
+            if remaining == Duration::ZERO {
+                break;
+            }
+
+            let step = if remaining > FADE_INTERVAL {
+                FADE_INTERVAL
+            } else {
+                remaining
+            };
+            self.delay_for(step);
+            elapsed = elapsed.checked_add(step).unwrap_or(duration);
+        }
+
+        self.lights.set_brightness(target_brightness)?;
+        Ok(())
+    }
+}
+
+fn ease_out_quad(progress: f32) -> f32 {
+    let clamped = progress.clamp(0.0, 1.0);
+    let inv = 1.0 - clamped;
+    1.0 - inv * inv
 }
 
 #[derive(Clone, Copy)]

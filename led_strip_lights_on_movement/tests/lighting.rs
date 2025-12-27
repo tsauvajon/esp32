@@ -33,8 +33,8 @@ const TESTS: &[TestCase] = &[
         test: handles_non_divisible_step_sizes,
     },
     TestCase {
-        name: "lighting::propagates_light_on_errors",
-        test: propagates_light_on_errors,
+        name: "lighting::propagates_brightness_errors",
+        test: propagates_brightness_errors,
     },
     TestCase {
         name: "lighting::propagates_light_off_errors",
@@ -148,12 +148,6 @@ fn turns_off_after_duration_without_motion() -> TestResult {
         &[LightEvent::On, LightEvent::Off],
         "lights should toggle on/off exactly once",
     )?;
-    let first_delay = sleeper.delays.first();
-    ensure_eq(
-        &first_delay,
-        &Some(&profile.grace_period),
-        "driver must wait for grace period",
-    )?;
     let step_delays = sleeper
         .delays
         .iter()
@@ -233,9 +227,14 @@ fn immediately_turns_off_when_grace_exceeds_light_duration() -> TestResult {
         &[LightEvent::On, LightEvent::Off],
         "lights should toggle on/off exactly once",
     )?;
+    let countdown_steps = sleeper
+        .delays
+        .iter()
+        .filter(|&&duration| duration == profile.step)
+        .count();
     ensure_eq(
-        sleeper.delays.as_slice(),
-        &[profile.grace_period],
+        &countdown_steps,
+        &0usize,
         "driver should exit immediately when grace exceeds duration",
     )?;
 
@@ -267,16 +266,6 @@ fn maintains_on_state_while_motion_continues() -> TestResult {
         lights.events.as_slice(),
         &[LightEvent::On, LightEvent::Off],
         "lights should toggle on/off exactly once",
-    )?;
-    let grace_delays = sleeper
-        .delays
-        .iter()
-        .filter(|&&duration| duration == profile.grace_period)
-        .count();
-    ensure_eq(
-        &grace_delays,
-        &1usize,
-        "grace period should run exactly once",
     )?;
     let step_delays = sleeper
         .delays
@@ -340,15 +329,15 @@ fn handles_non_divisible_step_sizes() -> TestResult {
     Ok(())
 }
 
-fn propagates_light_on_errors() -> TestResult {
-    let lights = FlakyLights::fail_on_on();
+fn propagates_brightness_errors() -> TestResult {
+    let lights = FlakyLights::fail_on_brightness();
     let sleeper = MockSleeper::default();
     let mut driver = Driver::new(lights, sleeper);
     let script = repeat_value(false, 1);
     let mut detector = MockMotionDetector::with_script(script);
 
     match driver.keep_on_until_silence_with_profile(&mut detector, LightingProfile::default()) {
-        Ok(_) => Err(TestError::new("driver should surface light_on errors")),
+        Ok(_) => Err(TestError::new("driver should surface brightness errors")),
         Err(_) => Ok(()),
     }
 }
@@ -386,16 +375,20 @@ where
 #[derive(Default, Debug)]
 struct MockLights {
     events: EventLog,
+    is_on: bool,
 }
 
 impl LightControl for MockLights {
-    fn light_on(&mut self) -> Result<(), ClocklessRmtError> {
-        self.events.push(LightEvent::On).unwrap();
-        Ok(())
-    }
-
-    fn light_off(&mut self) -> Result<(), ClocklessRmtError> {
-        self.events.push(LightEvent::Off).unwrap();
+    fn set_brightness(&mut self, brightness: f32) -> Result<(), ClocklessRmtError> {
+        let turning_on = !self.is_on && brightness > 0.0;
+        let turning_off = self.is_on && brightness <= 0.0;
+        if turning_on {
+            self.events.push(LightEvent::On).unwrap();
+            self.is_on = true;
+        } else if turning_off {
+            self.events.push(LightEvent::Off).unwrap();
+            self.is_on = false;
+        }
         Ok(())
     }
 }
@@ -415,6 +408,7 @@ impl Sleeper for MockSleeper {
 struct FlakyLights {
     mode: FailureMode,
     events: EventLog,
+    is_on: bool,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -423,6 +417,7 @@ enum FailureMode {
     None,
     FailOnOn,
     FailOnOff,
+    FailOnBrightness,
 }
 
 impl FlakyLights {
@@ -439,15 +434,42 @@ impl FlakyLights {
             ..Default::default()
         }
     }
+
+    fn fail_on_brightness() -> Self {
+        Self {
+            mode: FailureMode::FailOnBrightness,
+            ..Default::default()
+        }
+    }
+
+    fn record_event(&mut self, brightness: f32) {
+        let turning_on = !self.is_on && brightness > 0.0;
+        let turning_off = self.is_on && brightness <= 0.0;
+        if turning_on {
+            self.events.push(LightEvent::On).unwrap();
+            self.is_on = true;
+        } else if turning_off {
+            self.events.push(LightEvent::Off).unwrap();
+            self.is_on = false;
+        }
+    }
 }
 
 impl LightControl for FlakyLights {
+    fn set_brightness(&mut self, brightness: f32) -> Result<(), ClocklessRmtError> {
+        if matches!(self.mode, FailureMode::FailOnBrightness) {
+            Err(ClocklessRmtError::BufferSizeExceeded)
+        } else {
+            self.record_event(brightness);
+            Ok(())
+        }
+    }
+
     fn light_on(&mut self) -> Result<(), ClocklessRmtError> {
         if matches!(self.mode, FailureMode::FailOnOn) {
             Err(ClocklessRmtError::BufferSizeExceeded)
         } else {
-            self.events.push(LightEvent::On).unwrap();
-            Ok(())
+            self.set_brightness(pir_motion_sensor::lighting::TARGET_BRIGHTNESS)
         }
     }
 
@@ -455,8 +477,7 @@ impl LightControl for FlakyLights {
         if matches!(self.mode, FailureMode::FailOnOff) {
             Err(ClocklessRmtError::BufferSizeExceeded)
         } else {
-            self.events.push(LightEvent::Off).unwrap();
-            Ok(())
+            self.set_brightness(0.0)
         }
     }
 }
