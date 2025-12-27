@@ -6,27 +6,38 @@
     holding buffers for the duration of a data transfer."
 )]
 
+use core::future::pending;
+use core::time::Duration;
+
+use embassy_executor::{Spawner, task};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::delay::Delay;
 use esp_hal::gpio::{Input, InputConfig, Pull};
-use esp_hal::main;
-use esp_hal::time::Duration;
-use log::info;
+use esp_hal::timer::timg::TimerGroup;
+use log::{error, info};
 use pir_motion_sensor::led_strip::build_led_controller;
-use pir_motion_sensor::lighting::{Driver, LedStrip, STEP};
-use pir_motion_sensor::motion_detection::{MotionDetector, PirMotionSensor};
+use pir_motion_sensor::lighting::{Driver, EmbassySleeper, LedStrip, STEP};
+use pir_motion_sensor::mk_static;
+use pir_motion_sensor::motion_detection::{
+    MotionDetector, MotionState, PirMotionSensor, SharedMotionDetector, monitor_motion,
+};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-const STARTUP_DELAY: Duration = Duration::from_secs(3); // How long to initially light up before trusting the PIR
+const STARTUP_DELAY: Duration = Duration::from_secs(3);
+static MOTION_STATE: MotionState = MotionState::new();
 
-#[main]
-fn main() -> ! {
+#[esp_rtos::main]
+async fn main(spawner: Spawner) -> ! {
     esp_println::logger::init_logger_from_env();
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
+
+    let timer_group = TimerGroup::new(peripherals.TIMG0);
+    esp_rtos::start(timer_group.timer0);
+
+    info!("Embassy initialized");
 
     let movement_detection_pin = peripherals.GPIO17;
     let led_strip_data_pin = peripherals.GPIO16;
@@ -35,27 +46,51 @@ fn main() -> ! {
         movement_detection_pin,
         InputConfig::default().with_pull(Pull::Down),
     );
-    let mut motion_sensor = PirMotionSensor::new(sensor_pin);
+    let motion_sensor = mk_static!(PirMotionSensor<'static>, PirMotionSensor::new(sensor_pin));
 
-    let delay = Delay::new();
     let led_control = build_led_controller(peripherals.RMT, led_strip_data_pin);
     let lights = LedStrip::new(led_control);
-    let mut driver = Driver::new(lights, delay);
-    driver.light_on().unwrap();
+    let driver = mk_static!(
+        Driver<LedStrip<'static>, EmbassySleeper>,
+        Driver::new(lights, EmbassySleeper)
+    );
 
-    info!("Delaying start - {STARTUP_DELAY}!");
-    driver.delay_for(STARTUP_DELAY);
+    spawner
+        .spawn(monitor_motion(motion_sensor, &MOTION_STATE, STEP))
+        .unwrap();
 
-    driver.light_off().unwrap();
+    spawner.spawn(lighting_task(driver, &MOTION_STATE)).unwrap();
 
     loop {
-        if motion_sensor.motion_detected() {
-            driver.keep_on_until_silence(&mut motion_sensor).unwrap();
+        pending::<()>().await;
+    }
+}
+
+#[task]
+async fn lighting_task(
+    driver: &'static mut Driver<LedStrip<'static>, EmbassySleeper>,
+    state: &'static MotionState,
+) -> ! {
+    let mut detector = SharedMotionDetector::new(state);
+
+    if let Err(err) = driver.light_on() {
+        error!("toggle lights on at startup: {err:?}");
+    }
+    driver.delay_for(STARTUP_DELAY).await;
+    if let Err(err) = driver.light_off() {
+        error!("toggle lights off at startup: {err:?}");
+    }
+
+    loop {
+        if detector.motion_detected() {
+            if let Err(err) = driver.keep_on_until_silence(&mut detector).await {
+                error!("lighting sequence: {err:?}");
+            }
             continue;
-        } else {
-            driver.light_off().unwrap();
+        } else if let Err(err) = driver.light_off() {
+            error!("keep lights off: {err:?}");
         }
 
-        driver.delay_for(STEP);
+        driver.delay_for(STEP).await;
     }
 }

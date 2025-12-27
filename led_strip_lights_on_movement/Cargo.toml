@@ -12,6 +12,8 @@ test = false
 [dependencies]
 blinksy = "0.11.0"
 blinksy-esp = "0.11.0"
+embassy-executor = { version = "0.9.1", features = ["log"] }
+embassy-time = { version = "0.5.0", features = ["log"] }
 critical-section = "1.2.0"
 embedded-io = "0.7.1"
 esp-backtrace = { version = "0.18.1", features = [
@@ -21,6 +23,7 @@ esp-backtrace = { version = "0.18.1", features = [
 ] }
 esp-bootloader-esp-idf = { version = "0.4.0", features = ["esp32", "log-04"] }
 esp-hal = { version = "1.0.0", features = ["esp32", "log-04", "unstable"] }
+esp-rtos = { version = "0.2.0", features = ["embassy", "esp32", "log-04"] }
 esp-println = { version = "0.16.1", features = ["esp32", "log-04"] }
 log = "0.4.27"
 static_cell = "2.1.1"

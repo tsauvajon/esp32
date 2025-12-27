@@ -3,79 +3,92 @@
 
 use blinksy_esp::ClocklessRmtError;
 use core::fmt::Debug;
-use esp_hal::main;
-use esp_hal::time::Duration;
+use core::future::Future;
+use core::time::Duration;
+use embassy_executor::Spawner;
+use esp_hal::Config;
+use esp_hal::clock::CpuClock;
+use esp_hal::timer::timg::TimerGroup;
 use heapless::Vec;
 use pir_motion_sensor::lighting::{Driver, LightControl, LightingProfile, Sleeper};
 use pir_motion_sensor::motion_detection::MotionDetector;
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
-const TESTS: &[TestCase] = &[
-    TestCase {
-        name: "lighting::turns_off_after_duration_without_motion",
-        test: turns_off_after_duration_without_motion,
-    },
-    TestCase {
-        name: "lighting::resets_countdown_when_motion_detected_during_window",
-        test: resets_countdown_when_motion_detected_during_window,
-    },
-    TestCase {
-        name: "lighting::immediately_turns_off_when_grace_exceeds_light_duration",
-        test: immediately_turns_off_when_grace_exceeds_light_duration,
-    },
-    TestCase {
-        name: "lighting::maintains_on_state_while_motion_continues",
-        test: maintains_on_state_while_motion_continues,
-    },
-    TestCase {
-        name: "lighting::handles_non_divisible_step_sizes",
-        test: handles_non_divisible_step_sizes,
-    },
-    TestCase {
-        name: "lighting::propagates_brightness_errors",
-        test: propagates_brightness_errors,
-    },
-    TestCase {
-        name: "lighting::propagates_light_off_errors",
-        test: propagates_light_off_errors,
-    },
-];
-
+const TEST_COUNT: usize = 7;
 const MAX_TESTS: usize = 12;
 type FailureLog = Vec<Failure, MAX_TESTS>;
 
-#[main]
-fn main() -> ! {
+#[esp_rtos::main]
+async fn main(_spawner: Spawner) -> ! {
     esp_println::logger::init_logger_from_env();
-    run_tests();
+
+    let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
+    let peripherals = esp_hal::init(config);
+    let timer_group = TimerGroup::new(peripherals.TIMG0);
+    esp_rtos::start(timer_group.timer0);
+
+    run_tests().await;
 }
 
-fn run_tests() -> ! {
-    esp_println::println!("running {} tests", TESTS.len());
+async fn run_tests() -> ! {
+    esp_println::println!("running {} tests", TEST_COUNT);
 
     let mut passed = 0usize;
     let mut failures: FailureLog = Vec::new();
 
-    for case in TESTS {
-        esp_println::print!("test {} ... ", case.name);
-        match (case.test)() {
-            Ok(()) => {
-                passed += 1;
-                esp_println::println!("ok");
-            }
-            Err(err) => {
-                let _ = failures.push(Failure {
-                    name: case.name,
-                    message: err.message,
-                });
-                esp_println::println!("FAILED");
-            }
-        }
-    }
+    run_case(
+        "lighting::turns_off_after_duration_without_motion",
+        turns_off_after_duration_without_motion(),
+        &mut passed,
+        &mut failures,
+    )
+    .await;
+    run_case(
+        "lighting::resets_countdown_when_motion_detected_during_window",
+        resets_countdown_when_motion_detected_during_window(),
+        &mut passed,
+        &mut failures,
+    )
+    .await;
+    run_case(
+        "lighting::immediately_turns_off_when_grace_exceeds_light_duration",
+        immediately_turns_off_when_grace_exceeds_light_duration(),
+        &mut passed,
+        &mut failures,
+    )
+    .await;
+    run_case(
+        "lighting::maintains_on_state_while_motion_continues",
+        maintains_on_state_while_motion_continues(),
+        &mut passed,
+        &mut failures,
+    )
+    .await;
+    run_case(
+        "lighting::handles_non_divisible_step_sizes",
+        handles_non_divisible_step_sizes(),
+        &mut passed,
+        &mut failures,
+    )
+    .await;
+    run_case(
+        "lighting::propagates_brightness_errors",
+        propagates_brightness_errors(),
+        &mut passed,
+        &mut failures,
+    )
+    .await;
+    run_case(
+        "lighting::propagates_light_off_errors",
+        propagates_light_off_errors(),
+        &mut passed,
+        &mut failures,
+    )
+    .await;
 
     let failed = failures.len();
-    let ignored = TESTS.len().saturating_sub(passed + failed);
+    let ignored = TEST_COUNT.saturating_sub(passed + failed);
     let status = if failed == 0 { "ok" } else { "FAILED" };
 
     if failed > 0 {
@@ -101,9 +114,26 @@ fn run_tests() -> ! {
     }
 }
 
-struct TestCase {
+async fn run_case(
     name: &'static str,
-    test: fn() -> TestResult,
+    test: impl Future<Output = TestResult>,
+    passed: &mut usize,
+    failures: &mut FailureLog,
+) {
+    esp_println::print!("test {} ... ", name);
+    match test.await {
+        Ok(()) => {
+            *passed += 1;
+            esp_println::println!("ok");
+        }
+        Err(err) => {
+            let _ = failures.push(Failure {
+                name,
+                message: err.message,
+            });
+            esp_println::println!("FAILED");
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -125,7 +155,7 @@ impl TestError {
     }
 }
 
-fn turns_off_after_duration_without_motion() -> TestResult {
+async fn turns_off_after_duration_without_motion() -> TestResult {
     let profile = LightingProfile::new(
         Duration::from_millis(500),
         Duration::from_millis(200),
@@ -140,6 +170,7 @@ fn turns_off_after_duration_without_motion() -> TestResult {
 
     driver
         .keep_on_until_silence_with_profile(&mut detector, profile)
+        .await
         .map_err(|_| TestError::new("driver failed to keep lights on"))?;
 
     let (lights, sleeper) = driver.into_parts();
@@ -158,7 +189,7 @@ fn turns_off_after_duration_without_motion() -> TestResult {
     Ok(())
 }
 
-fn resets_countdown_when_motion_detected_during_window() -> TestResult {
+async fn resets_countdown_when_motion_detected_during_window() -> TestResult {
     let profile = LightingProfile::new(
         Duration::from_millis(500),
         Duration::from_millis(200),
@@ -178,6 +209,7 @@ fn resets_countdown_when_motion_detected_during_window() -> TestResult {
 
     driver
         .keep_on_until_silence_with_profile(&mut detector, profile)
+        .await
         .map_err(|_| TestError::new("driver failed to keep lights on"))?;
 
     let (lights, sleeper) = driver.into_parts();
@@ -197,7 +229,7 @@ fn resets_countdown_when_motion_detected_during_window() -> TestResult {
     Ok(())
 }
 
-fn immediately_turns_off_when_grace_exceeds_light_duration() -> TestResult {
+async fn immediately_turns_off_when_grace_exceeds_light_duration() -> TestResult {
     let profile = LightingProfile::new(
         Duration::from_millis(100),
         Duration::from_millis(200),
@@ -211,6 +243,7 @@ fn immediately_turns_off_when_grace_exceeds_light_duration() -> TestResult {
 
     driver
         .keep_on_until_silence_with_profile(&mut detector, profile)
+        .await
         .map_err(|_| TestError::new("driver failed to keep lights on"))?;
 
     let (lights, sleeper) = driver.into_parts();
@@ -229,7 +262,7 @@ fn immediately_turns_off_when_grace_exceeds_light_duration() -> TestResult {
     Ok(())
 }
 
-fn maintains_on_state_while_motion_continues() -> TestResult {
+async fn maintains_on_state_while_motion_continues() -> TestResult {
     let profile = LightingProfile::new(
         Duration::from_millis(800),
         Duration::from_millis(200),
@@ -247,6 +280,7 @@ fn maintains_on_state_while_motion_continues() -> TestResult {
 
     driver
         .keep_on_until_silence_with_profile(&mut detector, profile)
+        .await
         .map_err(|_| TestError::new("driver failed to keep lights on"))?;
 
     let (lights, sleeper) = driver.into_parts();
@@ -276,7 +310,7 @@ fn maintains_on_state_while_motion_continues() -> TestResult {
     Ok(())
 }
 
-fn handles_non_divisible_step_sizes() -> TestResult {
+async fn handles_non_divisible_step_sizes() -> TestResult {
     let profile = LightingProfile::new(
         Duration::from_millis(750),
         Duration::from_millis(100),
@@ -290,6 +324,7 @@ fn handles_non_divisible_step_sizes() -> TestResult {
 
     driver
         .keep_on_until_silence_with_profile(&mut detector, profile)
+        .await
         .map_err(|_| TestError::new("driver failed to keep lights on"))?;
 
     let (lights, sleeper) = driver.into_parts();
@@ -309,20 +344,23 @@ fn handles_non_divisible_step_sizes() -> TestResult {
     Ok(())
 }
 
-fn propagates_brightness_errors() -> TestResult {
+async fn propagates_brightness_errors() -> TestResult {
     let lights = FlakyLights::fail_on_brightness();
     let sleeper = MockSleeper::default();
     let mut driver = Driver::new(lights, sleeper);
     let script = repeat_value(false, 1);
     let mut detector = MockMotionDetector::with_script(script);
 
-    match driver.keep_on_until_silence_with_profile(&mut detector, LightingProfile::default()) {
+    match driver
+        .keep_on_until_silence_with_profile(&mut detector, LightingProfile::default())
+        .await
+    {
         Ok(_) => Err(TestError::new("driver should surface brightness errors")),
         Err(_) => Ok(()),
     }
 }
 
-fn propagates_light_off_errors() -> TestResult {
+async fn propagates_light_off_errors() -> TestResult {
     let lights = FlakyLights::fail_on_off();
     let sleeper = MockSleeper::default();
     let mut driver = Driver::new(lights, sleeper);
@@ -332,7 +370,10 @@ fn propagates_light_off_errors() -> TestResult {
     );
     let mut detector = MockMotionDetector::with_script(script);
 
-    match driver.keep_on_until_silence_with_profile(&mut detector, LightingProfile::default()) {
+    match driver
+        .keep_on_until_silence_with_profile(&mut detector, LightingProfile::default())
+        .await
+    {
         Ok(_) => Err(TestError::new("driver should surface light_off errors")),
         Err(_) => Ok(()),
     }
@@ -379,7 +420,7 @@ struct MockSleeper {
 }
 
 impl Sleeper for MockSleeper {
-    fn delay(&mut self, duration: Duration) {
+    async fn delay(&mut self, duration: Duration) {
         self.delays.push(duration).unwrap();
     }
 }

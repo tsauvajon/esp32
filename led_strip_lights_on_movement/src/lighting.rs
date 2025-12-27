@@ -1,6 +1,6 @@
 use blinksy_esp::ClocklessRmtError;
-use esp_hal::delay::Delay;
-use esp_hal::time::Duration;
+use core::{convert::TryFrom, time::Duration};
+use embassy_time::{Duration as EmbassyDuration, Timer};
 use log::info;
 
 use crate::led_strip::RmtControl;
@@ -47,13 +47,18 @@ impl<'a> LightControl for LedStrip<'a> {
     }
 }
 
+#[allow(async_fn_in_trait)]
 pub trait Sleeper {
-    fn delay(&mut self, duration: Duration);
+    async fn delay(&mut self, duration: Duration);
 }
 
-impl Sleeper for Delay {
-    fn delay(&mut self, duration: Duration) {
-        Delay::delay(self, duration);
+#[derive(Default)]
+pub struct EmbassySleeper;
+
+impl Sleeper for EmbassySleeper {
+    async fn delay(&mut self, duration: Duration) {
+        let duration = EmbassyDuration::try_from(duration).unwrap_or(EmbassyDuration::MAX);
+        Timer::after(duration).await;
     }
 }
 
@@ -90,8 +95,8 @@ where
         self.set_brightness(0.0)
     }
 
-    pub fn delay_for(&mut self, duration: Duration) {
-        self.sleeper.delay(duration);
+    pub async fn delay_for(&mut self, duration: Duration) {
+        self.sleeper.delay(duration).await;
     }
 
     fn set_brightness(&mut self, brightness: f32) -> Result<(), ClocklessRmtError> {
@@ -99,7 +104,7 @@ where
         self.lights.set_brightness(brightness)
     }
 
-    pub fn keep_on_until_silence(
+    pub async fn keep_on_until_silence(
         &mut self,
         motion_sensor: &mut impl MotionDetector,
     ) -> Result<(), ClocklessRmtError> {
@@ -110,9 +115,10 @@ where
                 ..LightingProfile::default()
             },
         )
+        .await
     }
 
-    pub fn keep_on_until_silence_with_profile(
+    pub async fn keep_on_until_silence_with_profile(
         &mut self,
         motion_sensor: &mut impl MotionDetector,
         profile: LightingProfile,
@@ -130,13 +136,16 @@ where
         let mut monitor = MotionMonitor::new(motion_sensor, profile.step);
 
         loop {
-            match self.transition_to(
-                TARGET_BRIGHTNESS,
-                fade_in_duration,
-                TransitionCurve::EaseOut,
-                &mut monitor,
-                TARGET_BRIGHTNESS,
-            )? {
+            match self
+                .transition_to(
+                    TARGET_BRIGHTNESS,
+                    fade_in_duration,
+                    TransitionCurve::EaseOut,
+                    &mut monitor,
+                    TARGET_BRIGHTNESS,
+                )
+                .await?
+            {
                 TransitionOutcome::MotionDetected => {
                     info!("Motion reset!");
                     continue;
@@ -144,18 +153,23 @@ where
                 TransitionOutcome::Completed => {}
             }
 
-            if let TransitionOutcome::MotionDetected = self.hold_for(hold_duration, &mut monitor)? {
+            if let TransitionOutcome::MotionDetected =
+                self.hold_for(hold_duration, &mut monitor).await?
+            {
                 info!("Motion reset!");
                 continue;
             }
 
-            match self.transition_to(
-                0.0,
-                fade_out_duration,
-                TransitionCurve::EaseIn,
-                &mut monitor,
-                TARGET_BRIGHTNESS,
-            )? {
+            match self
+                .transition_to(
+                    0.0,
+                    fade_out_duration,
+                    TransitionCurve::EaseIn,
+                    &mut monitor,
+                    TARGET_BRIGHTNESS,
+                )
+                .await?
+            {
                 TransitionOutcome::MotionDetected => {
                     info!("Motion reset!");
                     continue;
@@ -169,7 +183,7 @@ where
         }
     }
 
-    fn transition_to<M: MotionDetector>(
+    async fn transition_to<M: MotionDetector>(
         &mut self,
         target: f32,
         duration: Duration,
@@ -215,7 +229,7 @@ where
                 continue;
             }
 
-            self.delay_for(chunk);
+            self.delay_for(chunk).await;
             elapsed = elapsed.checked_add(chunk).unwrap_or(scaled_duration);
             monitor.advance(chunk);
 
@@ -232,7 +246,7 @@ where
         Ok(TransitionOutcome::Completed)
     }
 
-    fn hold_for<M: MotionDetector>(
+    async fn hold_for<M: MotionDetector>(
         &mut self,
         duration: Duration,
         monitor: &mut MotionMonitor<'_, M>,
@@ -257,7 +271,7 @@ where
                 continue;
             }
 
-            self.delay_for(chunk);
+            self.delay_for(chunk).await;
             elapsed = elapsed.checked_add(chunk).unwrap_or(duration);
             monitor.advance(chunk);
         }
@@ -307,15 +321,11 @@ fn scale_duration(duration: Duration, scale: f32) -> Duration {
     }
 }
 
-fn min_duration(a: Duration, b: Duration) -> Duration {
-    if a <= b { a } else { b }
-}
-
 fn next_chunk_duration<M: MotionDetector>(
     remaining: Duration,
     monitor: &MotionMonitor<'_, M>,
 ) -> Duration {
-    let mut chunk = min_duration(remaining, FADE_INTERVAL);
+    let mut chunk = remaining.min(FADE_INTERVAL);
     let limit = monitor.remaining_until_check();
     if limit != Duration::ZERO && limit < chunk {
         chunk = limit;
