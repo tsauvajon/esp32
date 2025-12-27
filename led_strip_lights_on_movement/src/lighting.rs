@@ -6,11 +6,12 @@ use log::info;
 use crate::led_strip::RmtControl;
 use crate::motion_detection::MotionDetector;
 
-pub const LIGHT_DURATION: Duration = Duration::from_secs(6);
+pub const LIGHT_DURATION: Duration = Duration::from_secs(15);
 pub const GRACE_PERIOD: Duration = Duration::from_secs(4);
-pub const STEP: Duration = Duration::from_millis(100);
+pub const STEP: Duration = Duration::from_millis(10);
 pub const TARGET_BRIGHTNESS: f32 = 0.1;
 const FADE_INTERVAL: Duration = Duration::from_millis(1);
+const FADE_OUT_DURATION: Duration = Duration::from_secs(5);
 
 pub trait LightControl {
     fn set_brightness(&mut self, brightness: f32) -> Result<(), ClocklessRmtError>;
@@ -59,11 +60,16 @@ impl Sleeper for Delay {
 pub struct Driver<L, S> {
     lights: L,
     sleeper: S,
+    current_brightness: f32,
 }
 
 impl<L, S> Driver<L, S> {
     pub fn new(lights: L, sleeper: S) -> Self {
-        Self { lights, sleeper }
+        Self {
+            lights,
+            sleeper,
+            current_brightness: 0.0,
+        }
     }
 
     pub fn into_parts(self) -> (L, S) {
@@ -77,15 +83,20 @@ where
     S: Sleeper,
 {
     pub fn light_on(&mut self) -> Result<(), ClocklessRmtError> {
-        self.lights.light_on()
+        self.set_brightness(TARGET_BRIGHTNESS)
     }
 
     pub fn light_off(&mut self) -> Result<(), ClocklessRmtError> {
-        self.lights.light_off()
+        self.set_brightness(0.0)
     }
 
     pub fn delay_for(&mut self, duration: Duration) {
         self.sleeper.delay(duration);
+    }
+
+    fn set_brightness(&mut self, brightness: f32) -> Result<(), ClocklessRmtError> {
+        self.current_brightness = brightness;
+        self.lights.set_brightness(brightness)
     }
 
     pub fn keep_on_until_silence(
@@ -106,69 +117,156 @@ where
         motion_sensor: &mut impl MotionDetector,
         profile: LightingProfile,
     ) -> Result<(), ClocklessRmtError> {
-        self.fade_to(profile.grace_period, TARGET_BRIGHTNESS)?;
-        let mut time_remaining = profile
+        let fade_in_duration = profile.grace_period.min(profile.light_duration);
+        let fade_out_duration = FADE_OUT_DURATION.min(profile.light_duration);
+        let fade_out_start = profile
             .light_duration
-            .checked_sub(profile.grace_period)
+            .checked_sub(fade_out_duration)
             .unwrap_or(Duration::ZERO);
+        let hold_duration = fade_out_start
+            .checked_sub(fade_in_duration)
+            .unwrap_or(Duration::ZERO);
+
+        let mut monitor = MotionMonitor::new(motion_sensor, profile.step);
+
         loop {
-            if motion_sensor.motion_detected() {
+            match self.transition_to(
+                TARGET_BRIGHTNESS,
+                fade_in_duration,
+                TransitionCurve::EaseOut,
+                &mut monitor,
+                TARGET_BRIGHTNESS,
+            )? {
+                TransitionOutcome::MotionDetected => {
+                    info!("Motion reset!");
+                    continue;
+                }
+                TransitionOutcome::Completed => {}
+            }
+
+            if let TransitionOutcome::MotionDetected = self.hold_for(hold_duration, &mut monitor)? {
                 info!("Motion reset!");
-                time_remaining = profile.light_duration;
+                continue;
             }
 
-            if time_remaining.le(&Duration::ZERO) {
-                info!("Clear");
-                self.light_off()?;
-                return Ok(());
+            match self.transition_to(
+                0.0,
+                fade_out_duration,
+                TransitionCurve::EaseIn,
+                &mut monitor,
+                TARGET_BRIGHTNESS,
+            )? {
+                TransitionOutcome::MotionDetected => {
+                    info!("Motion reset!");
+                    continue;
+                }
+                TransitionOutcome::Completed => {
+                    info!("Clear");
+                    self.light_off()?;
+                    return Ok(());
+                }
             }
-
-            self.delay_for(profile.step);
-            time_remaining = time_remaining
-                .checked_sub(profile.step)
-                .unwrap_or(Duration::ZERO);
         }
     }
 
-    fn fade_to(
+    fn transition_to<M: MotionDetector>(
         &mut self,
+        target: f32,
         duration: Duration,
-        target_brightness: f32,
-    ) -> Result<(), ClocklessRmtError> {
-        self.lights.set_brightness(0.0)?;
-        if duration == Duration::ZERO {
-            self.lights.set_brightness(target_brightness)?;
-            return Ok(());
+        curve: TransitionCurve,
+        monitor: &mut MotionMonitor<'_, M>,
+        full_range: f32,
+    ) -> Result<TransitionOutcome, ClocklessRmtError> {
+        let mut elapsed = Duration::ZERO;
+        let start = self.current_brightness;
+
+        let delta = (target - start).abs();
+        if delta <= f32::EPSILON {
+            self.set_brightness(target)?;
+            return Ok(TransitionOutcome::Completed);
         }
 
-        let total_us = duration.as_micros();
-        if total_us == 0 {
-            self.lights.set_brightness(target_brightness)?;
-            return Ok(());
+        let scaled_duration = scale_duration(duration, normalized_delta(delta, full_range));
+        if scaled_duration == Duration::ZERO {
+            self.set_brightness(target)?;
+            return Ok(TransitionOutcome::Completed);
+        }
+
+        let total = scaled_duration.as_micros() as f32;
+        if total <= 0.0 {
+            self.set_brightness(target)?;
+            return Ok(TransitionOutcome::Completed);
+        }
+
+        while elapsed < scaled_duration {
+            if monitor.should_check() && monitor.check() {
+                return Ok(TransitionOutcome::MotionDetected);
+            }
+
+            let remaining = scaled_duration
+                .checked_sub(elapsed)
+                .unwrap_or(Duration::ZERO);
+            if remaining == Duration::ZERO {
+                break;
+            }
+
+            let chunk = next_chunk_duration(remaining, monitor);
+            if chunk == Duration::ZERO {
+                continue;
+            }
+
+            let progress = elapsed
+                .checked_add(chunk)
+                .unwrap_or(scaled_duration)
+                .as_micros() as f32
+                / total;
+            let eased = match curve {
+                TransitionCurve::EaseIn => ease_in_quad(progress),
+                TransitionCurve::EaseOut => ease_out_quad(progress),
+            };
+            let brightness = interpolate(start, target, eased);
+            self.set_brightness(brightness.clamp(0.0, 1.0))?;
+
+            self.delay_for(chunk);
+            elapsed = elapsed.checked_add(chunk).unwrap_or(scaled_duration);
+            monitor.advance(chunk);
+        }
+
+        self.set_brightness(target)?;
+        Ok(TransitionOutcome::Completed)
+    }
+
+    fn hold_for<M: MotionDetector>(
+        &mut self,
+        duration: Duration,
+        monitor: &mut MotionMonitor<'_, M>,
+    ) -> Result<TransitionOutcome, ClocklessRmtError> {
+        if duration == Duration::ZERO {
+            return Ok(TransitionOutcome::Completed);
         }
 
         let mut elapsed = Duration::ZERO;
         while elapsed < duration {
-            let progress = elapsed.as_micros() as f32 / total_us as f32;
-            let eased = ease_out_quad(progress);
-            self.lights.set_brightness(target_brightness * eased)?;
+            if monitor.should_check() && monitor.check() {
+                return Ok(TransitionOutcome::MotionDetected);
+            }
 
             let remaining = duration.checked_sub(elapsed).unwrap_or(Duration::ZERO);
             if remaining == Duration::ZERO {
                 break;
             }
 
-            let step = if remaining > FADE_INTERVAL {
-                FADE_INTERVAL
-            } else {
-                remaining
-            };
-            self.delay_for(step);
-            elapsed = elapsed.checked_add(step).unwrap_or(duration);
+            let chunk = next_chunk_duration(remaining, monitor);
+            if chunk == Duration::ZERO {
+                continue;
+            }
+
+            self.delay_for(chunk);
+            elapsed = elapsed.checked_add(chunk).unwrap_or(duration);
+            monitor.advance(chunk);
         }
 
-        self.lights.set_brightness(target_brightness)?;
-        Ok(())
+        Ok(TransitionOutcome::Completed)
     }
 }
 
@@ -176,6 +274,120 @@ fn ease_out_quad(progress: f32) -> f32 {
     let clamped = progress.clamp(0.0, 1.0);
     let inv = 1.0 - clamped;
     1.0 - inv * inv
+}
+
+fn ease_in_quad(progress: f32) -> f32 {
+    let clamped = progress.clamp(0.0, 1.0);
+    clamped * clamped
+}
+
+fn interpolate(start: f32, end: f32, progress: f32) -> f32 {
+    start + (end - start) * progress
+}
+
+fn normalized_delta(delta: f32, full_range: f32) -> f32 {
+    if full_range <= f32::EPSILON {
+        1.0
+    } else {
+        (delta / full_range).clamp(0.0, 1.0)
+    }
+}
+
+fn scale_duration(duration: Duration, scale: f32) -> Duration {
+    if duration == Duration::ZERO || scale <= 0.0 {
+        return Duration::ZERO;
+    }
+
+    let micros = duration.as_micros();
+    if micros == 0 {
+        return Duration::ZERO;
+    }
+
+    let scaled = (micros as f32 * scale) as u64;
+    if scaled == 0 {
+        Duration::from_micros(1)
+    } else {
+        Duration::from_micros(scaled)
+    }
+}
+
+fn min_duration(a: Duration, b: Duration) -> Duration {
+    if a <= b { a } else { b }
+}
+
+fn next_chunk_duration<M: MotionDetector>(
+    remaining: Duration,
+    monitor: &MotionMonitor<'_, M>,
+) -> Duration {
+    let mut chunk = min_duration(remaining, FADE_INTERVAL);
+    let limit = monitor.remaining_until_check();
+    if limit != Duration::ZERO && limit < chunk {
+        chunk = limit;
+    }
+    chunk
+}
+
+struct MotionMonitor<'a, M: MotionDetector> {
+    detector: &'a mut M,
+    step: Duration,
+    time_until_next_check: Duration,
+}
+
+impl<'a, M: MotionDetector> MotionMonitor<'a, M> {
+    fn new(detector: &'a mut M, step: Duration) -> Self {
+        Self {
+            detector,
+            step,
+            time_until_next_check: Duration::ZERO,
+        }
+    }
+
+    fn should_check(&self) -> bool {
+        self.time_until_next_check == Duration::ZERO
+    }
+
+    fn check(&mut self) -> bool {
+        let detected = self.detector.motion_detected();
+        self.time_until_next_check = self.interval();
+        detected
+    }
+
+    fn advance(&mut self, duration: Duration) {
+        if duration >= self.time_until_next_check {
+            self.time_until_next_check = Duration::ZERO;
+        } else {
+            self.time_until_next_check = self
+                .time_until_next_check
+                .checked_sub(duration)
+                .unwrap_or(Duration::ZERO);
+        }
+    }
+
+    fn remaining_until_check(&self) -> Duration {
+        if self.step == Duration::ZERO {
+            FADE_INTERVAL
+        } else {
+            self.time_until_next_check
+        }
+    }
+
+    fn interval(&self) -> Duration {
+        if self.step == Duration::ZERO {
+            FADE_INTERVAL
+        } else {
+            self.step
+        }
+    }
+}
+
+enum TransitionCurve {
+    EaseIn,
+    EaseOut,
+}
+
+enum TransitionOutcome {
+    Completed,
+    MotionDetected,
 }
 
 #[derive(Clone, Copy)]

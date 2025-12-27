@@ -148,11 +148,7 @@ fn turns_off_after_duration_without_motion() -> TestResult {
         &[LightEvent::On, LightEvent::Off],
         "lights should toggle on/off exactly once",
     )?;
-    let step_delays = sleeper
-        .delays
-        .iter()
-        .filter(|&&duration| duration == profile.step)
-        .count();
+    let step_delays = count_step_intervals(sleeper.delays.as_slice(), profile.step);
     ensure_eq(
         &step_delays,
         &steps_needed,
@@ -190,11 +186,7 @@ fn resets_countdown_when_motion_detected_during_window() -> TestResult {
         &[LightEvent::On, LightEvent::Off],
         "lights should toggle on/off exactly once",
     )?;
-    let step_delays = sleeper
-        .delays
-        .iter()
-        .filter(|&&duration| duration == profile.step)
-        .count();
+    let step_delays = count_step_intervals(sleeper.delays.as_slice(), profile.step);
     let expected = reset_steps as usize + 2;
     ensure_eq(
         &step_delays,
@@ -227,11 +219,7 @@ fn immediately_turns_off_when_grace_exceeds_light_duration() -> TestResult {
         &[LightEvent::On, LightEvent::Off],
         "lights should toggle on/off exactly once",
     )?;
-    let countdown_steps = sleeper
-        .delays
-        .iter()
-        .filter(|&&duration| duration == profile.step)
-        .count();
+    let countdown_steps = count_step_intervals(sleeper.delays.as_slice(), profile.step);
     ensure_eq(
         &countdown_steps,
         &0usize,
@@ -267,11 +255,7 @@ fn maintains_on_state_while_motion_continues() -> TestResult {
         &[LightEvent::On, LightEvent::Off],
         "lights should toggle on/off exactly once",
     )?;
-    let step_delays = sleeper
-        .delays
-        .iter()
-        .filter(|&&duration| duration == profile.step)
-        .count();
+    let step_delays = count_step_intervals(sleeper.delays.as_slice(), profile.step);
     let remaining_after_motion = profile
         .light_duration
         .checked_sub(profile.step)
@@ -314,11 +298,7 @@ fn handles_non_divisible_step_sizes() -> TestResult {
         &[LightEvent::On, LightEvent::Off],
         "lights should toggle on/off exactly once",
     )?;
-    let step_delays = sleeper
-        .delays
-        .iter()
-        .filter(|&&duration| duration == profile.step)
-        .count();
+    let step_delays = count_step_intervals(sleeper.delays.as_slice(), profile.step);
     let expected = steps_to_clear(profile);
     ensure_eq(
         &step_delays,
@@ -529,6 +509,29 @@ fn steps_for_duration(duration: Duration, step: Duration) -> u32 {
         .as_micros()
         .checked_div(step.as_micros())
         .unwrap_or(0) as u32
+}
+
+fn count_step_intervals(delays: &[Duration], step: Duration) -> usize {
+    if step == Duration::ZERO {
+        return 0;
+    }
+
+    let step_us = step.as_micros();
+    if step_us == 0 {
+        return 0;
+    }
+
+    let mut accumulated: u128 = 0;
+    let mut count = 0usize;
+    for &delay in delays {
+        accumulated = accumulated.saturating_add(delay.as_micros() as u128);
+        while accumulated >= step_us as u128 {
+            accumulated -= step_us as u128;
+            count += 1;
+        }
+    }
+
+    count
 }
 
 /// No std::vec, so this replaces the vec!["some value to repeat"; 55] syntax.
