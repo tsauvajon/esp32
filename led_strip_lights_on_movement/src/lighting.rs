@@ -11,14 +11,7 @@ pub const GRACE_PERIOD: Duration = Duration::from_secs(4);
 pub const STEP: Duration = Duration::from_millis(100);
 pub const TARGET_BRIGHTNESS: f32 = 0.09;
 pub const MIN_BRIGHTNESS: f32 = 0.04;
-const BRIGHTNESS_RANGE: f32 = TARGET_BRIGHTNESS - MIN_BRIGHTNESS;
-// Samples derived from WLED's default gamma fade curve to keep low end warm.
-const WLED_FADE_PROFILE: &[f32] = &[
-    0.0, 0.015, 0.028, 0.045, 0.065, 0.09, 0.12, 0.155, 0.195, 0.24, 0.29, 0.35, 0.42, 0.5, 0.6,
-    0.7, 0.8, 0.88, 0.94, 0.975, 1.0,
-];
-const FADE_INTERVAL: Duration = Duration::from_millis(25);
-const FADE_OUT_DURATION: Duration = Duration::from_secs(5);
+const CHECK_INTERVAL: Duration = Duration::from_millis(25);
 
 pub trait LightControl {
     fn set_brightness(&mut self, brightness: f32) -> Result<(), ClocklessRmtError>;
@@ -135,56 +128,11 @@ where
         motion_sensor: &mut impl MotionDetector,
         profile: LightingProfile,
     ) -> Result<(), ClocklessRmtError> {
-        if self.current_brightness <= MIN_BRIGHTNESS {
-            self.set_brightness(MIN_BRIGHTNESS)?;
-        }
-        let fade_in_duration = profile.grace_period.min(profile.light_duration);
-        let fade_out_duration = FADE_OUT_DURATION.min(profile.light_duration);
-        let fade_out_start = profile
-            .light_duration
-            .checked_sub(fade_out_duration)
-            .unwrap_or(Duration::ZERO);
-        let hold_duration = fade_out_start
-            .checked_sub(fade_in_duration)
-            .unwrap_or(Duration::ZERO);
-
         let mut monitor = MotionMonitor::new(motion_sensor, profile.step);
 
         loop {
-            match self
-                .transition_to(
-                    TARGET_BRIGHTNESS,
-                    fade_in_duration,
-                    TransitionCurve::EaseOut,
-                    &mut monitor,
-                    BRIGHTNESS_RANGE,
-                )
-                .await?
-            {
-                TransitionOutcome::MotionDetected => {
-                    info!("Motion reset!");
-                    continue;
-                }
-                TransitionOutcome::Completed => {}
-            }
-
-            if let TransitionOutcome::MotionDetected =
-                self.hold_for(hold_duration, &mut monitor).await?
-            {
-                info!("Motion reset!");
-                continue;
-            }
-
-            match self
-                .transition_to(
-                    MIN_BRIGHTNESS,
-                    fade_out_duration,
-                    TransitionCurve::EaseIn,
-                    &mut monitor,
-                    BRIGHTNESS_RANGE,
-                )
-                .await?
-            {
+            self.set_brightness(TARGET_BRIGHTNESS)?;
+            match self.hold_for(profile.light_duration, &mut monitor).await? {
                 TransitionOutcome::MotionDetected => {
                     info!("Motion reset!");
                     continue;
@@ -196,70 +144,6 @@ where
                 }
             }
         }
-    }
-
-    async fn transition_to<M: MotionDetector>(
-        &mut self,
-        target: f32,
-        duration: Duration,
-        curve: TransitionCurve,
-        monitor: &mut MotionMonitor<'_, M>,
-        range: f32,
-    ) -> Result<TransitionOutcome, ClocklessRmtError> {
-        let mut elapsed = Duration::ZERO;
-        let start = self.current_brightness;
-
-        let delta = (target - start).abs();
-        if delta <= f32::EPSILON {
-            self.set_brightness(target)?;
-            return Ok(TransitionOutcome::Completed);
-        }
-
-        let scaled_duration = scale_duration(duration, normalized_delta(delta, range));
-        if scaled_duration == Duration::ZERO {
-            self.set_brightness(target)?;
-            return Ok(TransitionOutcome::Completed);
-        }
-
-        let total = scaled_duration.as_micros() as f32;
-        if total <= 0.0 {
-            self.set_brightness(target)?;
-            return Ok(TransitionOutcome::Completed);
-        }
-
-        while elapsed < scaled_duration {
-            if monitor.should_check() && monitor.check() {
-                return Ok(TransitionOutcome::MotionDetected);
-            }
-
-            let remaining = scaled_duration
-                .checked_sub(elapsed)
-                .unwrap_or(Duration::ZERO);
-            if remaining == Duration::ZERO {
-                break;
-            }
-
-            let chunk = next_chunk_duration(remaining, monitor);
-            if chunk == Duration::ZERO {
-                continue;
-            }
-
-            self.delay_for(chunk).await;
-            elapsed = elapsed.checked_add(chunk).unwrap_or(scaled_duration);
-            monitor.advance(chunk);
-
-            let progress = elapsed.as_micros() as f32 / total;
-            let eased = match curve {
-                TransitionCurve::EaseIn => ease_in_quad(progress),
-                TransitionCurve::EaseOut => ease_out_quad(progress),
-            };
-            let shaped = apply_brightness_profile(eased);
-            let brightness = interpolate(start, target, shaped);
-            self.set_brightness(brightness.clamp(MIN_BRIGHTNESS, 1.0))?;
-        }
-
-        self.set_brightness(target)?;
-        Ok(TransitionOutcome::Completed)
     }
 
     async fn hold_for<M: MotionDetector>(
@@ -296,74 +180,11 @@ where
     }
 }
 
-fn ease_out_quad(progress: f32) -> f32 {
-    let clamped = progress.clamp(0.0, 1.0);
-    let inv = 1.0 - clamped;
-    1.0 - inv * inv
-}
-
-fn ease_in_quad(progress: f32) -> f32 {
-    let clamped = progress.clamp(0.0, 1.0);
-    clamped * clamped
-}
-
-fn interpolate(start: f32, end: f32, progress: f32) -> f32 {
-    start + (end - start) * progress
-}
-
-fn normalized_delta(delta: f32, range: f32) -> f32 {
-    if range <= f32::EPSILON {
-        1.0
-    } else {
-        (delta / range).clamp(0.0, 1.0)
-    }
-}
-
-fn apply_brightness_profile(progress: f32) -> f32 {
-    if progress <= 0.0 {
-        return 0.0;
-    }
-    if progress >= 1.0 {
-        return 1.0;
-    }
-
-    let segments = WLED_FADE_PROFILE.len().saturating_sub(1);
-    if segments == 0 {
-        return progress;
-    }
-
-    let scaled = progress * segments as f32;
-    let index = scaled as usize;
-    let next = (index + 1).min(WLED_FADE_PROFILE.len() - 1);
-    let start = WLED_FADE_PROFILE[index];
-    let end = WLED_FADE_PROFILE[next];
-    let t = scaled - index as f32;
-    start + (end - start) * t
-}
-
-fn scale_duration(duration: Duration, scale: f32) -> Duration {
-    if duration == Duration::ZERO || scale <= 0.0 {
-        return Duration::ZERO;
-    }
-
-    let micros = duration.as_micros();
-    if micros == 0 {
-        return Duration::ZERO;
-    }
-
-    let scaled = (micros as f32 * scale) as u64;
-    if scaled == 0 {
-        Duration::from_micros(1)
-    } else {
-        Duration::from_micros(scaled)
-    }
-}
-
 fn next_chunk_duration<M: MotionDetector>(
     remaining: Duration,
     monitor: &MotionMonitor<'_, M>,
 ) -> Duration {
-    let mut chunk = remaining.min(FADE_INTERVAL);
+    let mut chunk = remaining.min(CHECK_INTERVAL);
     let limit = monitor.remaining_until_check();
     if limit != Duration::ZERO && limit < chunk {
         chunk = limit;
@@ -409,7 +230,7 @@ impl<'a, M: MotionDetector> MotionMonitor<'a, M> {
 
     fn remaining_until_check(&self) -> Duration {
         if self.step == Duration::ZERO {
-            FADE_INTERVAL
+            CHECK_INTERVAL
         } else {
             self.time_until_next_check
         }
@@ -417,16 +238,11 @@ impl<'a, M: MotionDetector> MotionMonitor<'a, M> {
 
     fn interval(&self) -> Duration {
         if self.step == Duration::ZERO {
-            FADE_INTERVAL
+            CHECK_INTERVAL
         } else {
             self.step
         }
     }
-}
-
-enum TransitionCurve {
-    EaseIn,
-    EaseOut,
 }
 
 enum TransitionOutcome {
