@@ -49,22 +49,12 @@ fn main() -> ! {
 
     driver.light_off().unwrap();
 
-    let mut triggers = 0;
     loop {
         if motion_sensor.motion_detected() {
-            triggers += 1;
-            // Avoid false positives, by requiring detection several times in a row
-            if triggers >= REQUIRED_CONSECUTIVE_DETECTIONS {
-                info!("Initial motion!");
-                driver.keep_on_until_silence(&mut motion_sensor).unwrap();
-                triggers = 0;
-                continue;
-            }
-
-            info!("Trigger {triggers}");
+            driver.keep_on_until_silence(&mut motion_sensor).unwrap();
+            continue;
         } else {
             driver.light_off().unwrap();
-            triggers = 0;
         }
 
         driver.delay_for(STEP);
