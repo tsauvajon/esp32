@@ -73,21 +73,25 @@ async fn lighting_task(
 ) -> ! {
     let mut detector = SharedMotionDetector::new(state);
 
+    info!("initial lightning to indicate power on");
     if let Err(err) = driver.light_on() {
         error!("toggle lights on at startup: {err:?}");
     }
     driver.delay_for(STARTUP_DELAY).await;
+    info!("initial lightning off");
     if let Err(err) = driver.light_off() {
         error!("toggle lights off at startup: {err:?}");
     }
 
     loop {
         if detector.motion_detected() {
+            info!("motion detected, lighting");
             if let Err(err) = driver.keep_on_until_silence(&mut detector).await {
                 error!("lighting sequence: {err:?}");
             }
             continue;
         } else if let Err(err) = driver.light_off() {
+            info!("no motion detected, turning off");
             error!("keep lights off: {err:?}");
         }
 
