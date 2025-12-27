@@ -9,7 +9,10 @@ use crate::motion_detection::MotionDetector;
 pub const LIGHT_DURATION: Duration = Duration::from_secs(15);
 pub const GRACE_PERIOD: Duration = Duration::from_secs(4);
 pub const STEP: Duration = Duration::from_millis(100);
-pub const TARGET_BRIGHTNESS: f32 = 0.07;
+pub const TARGET_BRIGHTNESS: f32 = 0.1;
+pub const MIN_BRIGHTNESS: f32 = 0.04;
+const BRIGHTNESS_RANGE: f32 = TARGET_BRIGHTNESS - MIN_BRIGHTNESS;
+const BRIGHTNESS_PROFILE: &[f32] = &[0.0, 0.25, 0.45, 0.65, 0.8, 0.9, 0.96, 1.0];
 const FADE_INTERVAL: Duration = Duration::from_millis(25);
 const FADE_OUT_DURATION: Duration = Duration::from_secs(5);
 
@@ -100,8 +103,13 @@ where
     }
 
     fn set_brightness(&mut self, brightness: f32) -> Result<(), ClocklessRmtError> {
-        self.current_brightness = brightness;
-        self.lights.set_brightness(brightness)
+        let clamped = if brightness <= 0.0 {
+            0.0
+        } else {
+            brightness.clamp(MIN_BRIGHTNESS, 1.0)
+        };
+        self.current_brightness = clamped;
+        self.lights.set_brightness(clamped)
     }
 
     pub async fn keep_on_until_silence(
@@ -123,6 +131,9 @@ where
         motion_sensor: &mut impl MotionDetector,
         profile: LightingProfile,
     ) -> Result<(), ClocklessRmtError> {
+        if self.current_brightness <= MIN_BRIGHTNESS {
+            self.set_brightness(MIN_BRIGHTNESS)?;
+        }
         let fade_in_duration = profile.grace_period.min(profile.light_duration);
         let fade_out_duration = FADE_OUT_DURATION.min(profile.light_duration);
         let fade_out_start = profile
@@ -142,7 +153,7 @@ where
                     fade_in_duration,
                     TransitionCurve::EaseOut,
                     &mut monitor,
-                    TARGET_BRIGHTNESS,
+                    BRIGHTNESS_RANGE,
                 )
                 .await?
             {
@@ -162,11 +173,11 @@ where
 
             match self
                 .transition_to(
-                    0.0,
+                    MIN_BRIGHTNESS,
                     fade_out_duration,
                     TransitionCurve::EaseIn,
                     &mut monitor,
-                    TARGET_BRIGHTNESS,
+                    BRIGHTNESS_RANGE,
                 )
                 .await?
             {
@@ -189,7 +200,7 @@ where
         duration: Duration,
         curve: TransitionCurve,
         monitor: &mut MotionMonitor<'_, M>,
-        full_range: f32,
+        range: f32,
     ) -> Result<TransitionOutcome, ClocklessRmtError> {
         let mut elapsed = Duration::ZERO;
         let start = self.current_brightness;
@@ -200,7 +211,7 @@ where
             return Ok(TransitionOutcome::Completed);
         }
 
-        let scaled_duration = scale_duration(duration, normalized_delta(delta, full_range));
+        let scaled_duration = scale_duration(duration, normalized_delta(delta, range));
         if scaled_duration == Duration::ZERO {
             self.set_brightness(target)?;
             return Ok(TransitionOutcome::Completed);
@@ -238,8 +249,9 @@ where
                 TransitionCurve::EaseIn => ease_in_quad(progress),
                 TransitionCurve::EaseOut => ease_out_quad(progress),
             };
-            let brightness = interpolate(start, target, eased);
-            self.set_brightness(brightness.clamp(0.0, 1.0))?;
+            let shaped = apply_brightness_profile(eased);
+            let brightness = interpolate(start, target, shaped);
+            self.set_brightness(brightness.clamp(MIN_BRIGHTNESS, 1.0))?;
         }
 
         self.set_brightness(target)?;
@@ -295,12 +307,34 @@ fn interpolate(start: f32, end: f32, progress: f32) -> f32 {
     start + (end - start) * progress
 }
 
-fn normalized_delta(delta: f32, full_range: f32) -> f32 {
-    if full_range <= f32::EPSILON {
+fn normalized_delta(delta: f32, range: f32) -> f32 {
+    if range <= f32::EPSILON {
         1.0
     } else {
-        (delta / full_range).clamp(0.0, 1.0)
+        (delta / range).clamp(0.0, 1.0)
     }
+}
+
+fn apply_brightness_profile(progress: f32) -> f32 {
+    if progress <= 0.0 {
+        return 0.0;
+    }
+    if progress >= 1.0 {
+        return 1.0;
+    }
+
+    let segments = BRIGHTNESS_PROFILE.len().saturating_sub(1);
+    if segments == 0 {
+        return progress;
+    }
+
+    let scaled = progress * segments as f32;
+    let index = scaled as usize;
+    let next = (index + 1).min(BRIGHTNESS_PROFILE.len() - 1);
+    let start = BRIGHTNESS_PROFILE[index];
+    let end = BRIGHTNESS_PROFILE[next];
+    let t = scaled - index as f32;
+    start + (end - start) * t
 }
 
 fn scale_duration(duration: Duration, scale: f32) -> Duration {

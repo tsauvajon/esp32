@@ -10,7 +10,7 @@ use esp_hal::Config;
 use esp_hal::clock::CpuClock;
 use esp_hal::timer::timg::TimerGroup;
 use heapless::Vec;
-use pir_motion_sensor::lighting::{Driver, LightControl, LightingProfile, Sleeper};
+use pir_motion_sensor::lighting::{Driver, LightControl, LightingProfile, MIN_BRIGHTNESS, Sleeper};
 use pir_motion_sensor::motion_detection::MotionDetector;
 
 esp_bootloader_esp_idf::esp_app_desc!();
@@ -18,6 +18,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 const TEST_COUNT: usize = 7;
 const MAX_TESTS: usize = 12;
 type FailureLog = Vec<Failure, MAX_TESTS>;
+const OFF_THRESHOLD: f32 = MIN_BRIGHTNESS + 0.000_1;
 
 #[esp_rtos::main]
 async fn main(_spawner: Spawner) -> ! {
@@ -401,8 +402,8 @@ struct MockLights {
 
 impl LightControl for MockLights {
     fn set_brightness(&mut self, brightness: f32) -> Result<(), ClocklessRmtError> {
-        let turning_on = !self.is_on && brightness > 0.0;
-        let turning_off = self.is_on && brightness <= 0.0;
+        let turning_on = !self.is_on && brightness > OFF_THRESHOLD;
+        let turning_off = self.is_on && brightness <= OFF_THRESHOLD;
         if turning_on {
             self.events.push(LightEvent::On).unwrap();
             self.is_on = true;
@@ -464,8 +465,8 @@ impl FlakyLights {
     }
 
     fn record_event(&mut self, brightness: f32) {
-        let turning_on = !self.is_on && brightness > 0.0;
-        let turning_off = self.is_on && brightness <= 0.0;
+        let turning_on = !self.is_on && brightness > OFF_THRESHOLD;
+        let turning_off = self.is_on && brightness <= OFF_THRESHOLD;
         if turning_on {
             self.events.push(LightEvent::On).unwrap();
             self.is_on = true;
