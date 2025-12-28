@@ -8,7 +8,6 @@ use crate::motion_detection::MotionDetector;
 
 pub const LIGHT_DURATION: Duration = Duration::from_secs(15);
 pub const GRACE_PERIOD: Duration = Duration::from_secs(4);
-pub const MOTION_CHECK_STEP: Duration = Duration::from_millis(100);
 pub const TARGET_BRIGHTNESS: f32 = 0.05;
 const CHECK_INTERVAL: Duration = Duration::from_millis(25);
 
@@ -257,6 +256,6 @@ impl LightingProfile {
 
 impl Default for LightingProfile {
     fn default() -> Self {
-        Self::new(LIGHT_DURATION, GRACE_PERIOD, MOTION_CHECK_STEP)
+        Self::new(LIGHT_DURATION, GRACE_PERIOD, Duration::ZERO)
     }
 }

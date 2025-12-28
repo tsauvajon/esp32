@@ -11,14 +11,15 @@ use core::future::pending;
 use core::time::Duration;
 
 use critical_section::Mutex;
-use embassy_executor::{Spawner, task};
+use embassy_executor::{task, Spawner};
+use embassy_sync::{blocking_mutex::raw::CriticalSectionRawMutex, signal::Signal};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
 use esp_hal::gpio::{Event, Input, InputConfig, Io, Pull};
 use esp_hal::timer::timg::TimerGroup;
 use log::{error, info};
 use pir_motion_sensor::led_strip::build_led_controller;
-use pir_motion_sensor::lighting::{Driver, EmbassySleeper, LedStrip, MOTION_CHECK_STEP};
+use pir_motion_sensor::lighting::{Driver, EmbassySleeper, LedStrip};
 use pir_motion_sensor::mk_static;
 use pir_motion_sensor::motion_detection::{MotionDetector, MotionState, SharedMotionDetector};
 
@@ -27,6 +28,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
 const STARTUP_DELAY: Duration = Duration::from_secs(3);
 static MOTION_STATE: MotionState = MotionState::new();
 static PIR_SENSOR: Mutex<RefCell<Option<Input<'static>>>> = Mutex::new(RefCell::new(None));
+static MOTION_SIGNAL: Signal<CriticalSectionRawMutex, ()> = Signal::new();
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
@@ -98,12 +100,14 @@ async fn lighting_task(
                 error!("lighting sequence: {err:?}");
             }
             continue;
-        } else if let Err(err) = driver.light_off() {
+        }
+
+        if let Err(err) = driver.light_off() {
             info!("no motion detected, turning off");
             error!("keep lights off: {err:?}");
         }
 
-        driver.delay_for(MOTION_CHECK_STEP).await;
+        MOTION_SIGNAL.wait().await;
     }
 }
 
@@ -121,5 +125,6 @@ fn gpio_interrupt_handler() {
 
         MOTION_STATE.update(pin.is_high());
         pin.clear_interrupt();
+        MOTION_SIGNAL.signal(());
     });
 }
