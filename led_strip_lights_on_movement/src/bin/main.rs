@@ -6,26 +6,27 @@
     holding buffers for the duration of a data transfer."
 )]
 
+use core::cell::RefCell;
 use core::future::pending;
 use core::time::Duration;
 
+use critical_section::Mutex;
 use embassy_executor::{Spawner, task};
 use esp_backtrace as _;
 use esp_hal::clock::CpuClock;
-use esp_hal::gpio::{Input, InputConfig, Pull};
+use esp_hal::gpio::{Event, Input, InputConfig, Io, Pull};
 use esp_hal::timer::timg::TimerGroup;
 use log::{error, info};
 use pir_motion_sensor::led_strip::build_led_controller;
 use pir_motion_sensor::lighting::{Driver, EmbassySleeper, LedStrip, MOTION_CHECK_STEP};
 use pir_motion_sensor::mk_static;
-use pir_motion_sensor::motion_detection::{
-    MotionDetector, MotionState, PirMotionSensor, SharedMotionDetector, monitor_motion,
-};
+use pir_motion_sensor::motion_detection::{MotionDetector, MotionState, SharedMotionDetector};
 
 esp_bootloader_esp_idf::esp_app_desc!();
 
 const STARTUP_DELAY: Duration = Duration::from_secs(3);
 static MOTION_STATE: MotionState = MotionState::new();
+static PIR_SENSOR: Mutex<RefCell<Option<Input<'static>>>> = Mutex::new(RefCell::new(None));
 
 #[esp_rtos::main]
 async fn main(spawner: Spawner) -> ! {
@@ -33,6 +34,9 @@ async fn main(spawner: Spawner) -> ! {
 
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
+
+    let mut io = Io::new(peripherals.IO_MUX);
+    io.set_interrupt_handler(gpio_interrupt_handler);
 
     let timer_group = TimerGroup::new(peripherals.TIMG0);
     esp_rtos::start(timer_group.timer0);
@@ -46,7 +50,15 @@ async fn main(spawner: Spawner) -> ! {
         movement_detection_pin,
         InputConfig::default().with_pull(Pull::Down),
     );
-    let motion_sensor = mk_static!(PirMotionSensor<'static>, PirMotionSensor::new(sensor_pin));
+    critical_section::with(|cs| {
+        let mut slot = PIR_SENSOR.borrow_ref_mut(cs);
+        slot.replace(sensor_pin);
+        if let Some(pin) = slot.as_mut() {
+            MOTION_STATE.update(pin.is_high());
+            pin.clear_interrupt();
+            pin.listen(Event::AnyEdge);
+        }
+    });
 
     let led_control = build_led_controller(peripherals.RMT, led_strip_data_pin);
     let lights = LedStrip::new(led_control);
@@ -54,14 +66,6 @@ async fn main(spawner: Spawner) -> ! {
         Driver<LedStrip<'static>, EmbassySleeper>,
         Driver::new(lights, EmbassySleeper)
     );
-
-    spawner
-        .spawn(monitor_motion(
-            motion_sensor,
-            &MOTION_STATE,
-            MOTION_CHECK_STEP,
-        ))
-        .unwrap();
 
     spawner.spawn(lighting_task(driver, &MOTION_STATE)).unwrap();
 
@@ -101,4 +105,21 @@ async fn lighting_task(
 
         driver.delay_for(MOTION_CHECK_STEP).await;
     }
+}
+
+#[esp_hal::handler]
+fn gpio_interrupt_handler() {
+    critical_section::with(|cs| {
+        let mut slot = PIR_SENSOR.borrow_ref_mut(cs);
+        let Some(pin) = slot.as_mut() else {
+            return;
+        };
+
+        if !pin.is_interrupt_set() {
+            return;
+        }
+
+        MOTION_STATE.update(pin.is_high());
+        pin.clear_interrupt();
+    });
 }
