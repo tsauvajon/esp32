@@ -9,8 +9,7 @@ use crate::motion_detection::MotionDetector;
 pub const LIGHT_DURATION: Duration = Duration::from_secs(15);
 pub const GRACE_PERIOD: Duration = Duration::from_secs(4);
 pub const STEP: Duration = Duration::from_millis(100);
-pub const TARGET_BRIGHTNESS: f32 = 0.09;
-pub const MIN_BRIGHTNESS: f32 = 0.04;
+pub const TARGET_BRIGHTNESS: f32 = 0.05;
 const CHECK_INTERVAL: Duration = Duration::from_millis(25);
 
 pub trait LightControl {
@@ -65,16 +64,11 @@ impl Sleeper for EmbassySleeper {
 pub struct Driver<L, S> {
     lights: L,
     sleeper: S,
-    current_brightness: f32,
 }
 
 impl<L, S> Driver<L, S> {
     pub fn new(lights: L, sleeper: S) -> Self {
-        Self {
-            lights,
-            sleeper,
-            current_brightness: 0.0,
-        }
+        Self { lights, sleeper }
     }
 
     pub fn into_parts(self) -> (L, S) {
@@ -100,13 +94,7 @@ where
     }
 
     fn set_brightness(&mut self, brightness: f32) -> Result<(), ClocklessRmtError> {
-        let clamped = if brightness <= 0.0 {
-            0.0
-        } else {
-            brightness.clamp(MIN_BRIGHTNESS, 1.0)
-        };
-        self.current_brightness = clamped;
-        self.lights.set_brightness(clamped)
+        self.lights.set_brightness(brightness)
     }
 
     pub async fn keep_on_until_silence(
