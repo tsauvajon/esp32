@@ -16,7 +16,7 @@ use esp_hal::gpio::{Input, InputConfig, Pull};
 use esp_hal::timer::timg::TimerGroup;
 use log::{error, info};
 use pir_motion_sensor::led_strip::build_led_controller;
-use pir_motion_sensor::lighting::{Driver, EmbassySleeper, LedStrip, STEP};
+use pir_motion_sensor::lighting::{Driver, EmbassySleeper, LedStrip, MOTION_CHECK_STEP};
 use pir_motion_sensor::mk_static;
 use pir_motion_sensor::motion_detection::{
     MotionDetector, MotionState, PirMotionSensor, SharedMotionDetector, monitor_motion,
@@ -56,7 +56,11 @@ async fn main(spawner: Spawner) -> ! {
     );
 
     spawner
-        .spawn(monitor_motion(motion_sensor, &MOTION_STATE, STEP))
+        .spawn(monitor_motion(
+            motion_sensor,
+            &MOTION_STATE,
+            MOTION_CHECK_STEP,
+        ))
         .unwrap();
 
     spawner.spawn(lighting_task(driver, &MOTION_STATE)).unwrap();
@@ -95,6 +99,6 @@ async fn lighting_task(
             error!("keep lights off: {err:?}");
         }
 
-        driver.delay_for(STEP).await;
+        driver.delay_for(MOTION_CHECK_STEP).await;
     }
 }
